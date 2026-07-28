@@ -22,6 +22,12 @@ const TABS = [
   { id: "objectives",  label: "Objectives"  },
 ];
 
+const SCOREBOARD_WEIGHT_FIELDS = [
+  { key: "scoreboard_completion_weight", label: "Task Completion Rate", description: "Share of assigned tasks that were completed." },
+  { key: "scoreboard_on_time_weight",    label: "On-Time Rate",         description: "Share of completed tasks finished on or before their due date." },
+  { key: "scoreboard_overdue_weight",    label: "Overdue Performance",  description: "How clean of currently-overdue tasks the employee is." },
+];
+
 const VALUE_COLORS = [
   { id: "slate",  bg: "bg-slate-100",  text: "text-slate-700",  border: "border-slate-200"  },
   { id: "blue",   bg: "bg-blue-100",   text: "text-blue-700",   border: "border-blue-200"   },
@@ -1795,12 +1801,135 @@ function ObjectivesTab({ canManage }) {
 
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
+function ScoreboardWeightsTab() {
+  const [weights, setWeights] = useState(null); // percentages, e.g. { scoreboard_completion_weight: 35, ... }
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    organizationApi.getScoreboardWeights()
+      .then((data) => {
+        setWeights({
+          scoreboard_completion_weight: Math.round(data.scoreboard_completion_weight * 100),
+          scoreboard_on_time_weight: Math.round(data.scoreboard_on_time_weight * 100),
+          scoreboard_overdue_weight: Math.round(data.scoreboard_overdue_weight * 100),
+        });
+      })
+      .catch(() => toast.error("Failed to load scoreboard weights."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  if (loading || !weights) {
+    return <div className="h-40 animate-pulse rounded-2xl bg-slate-100" />;
+  }
+
+  const total = SCOREBOARD_WEIGHT_FIELDS.reduce((sum, f) => sum + (weights[f.key] || 0), 0);
+  const isValid = total === 100;
+
+  // Moving one slider redistributes the remainder across the other two,
+  // proportional to their current ratio, so the total always stays at 100%
+  // instead of requiring the user to manually balance three numbers.
+  function handleSliderChange(changedKey, rawValue) {
+    const newValue = Math.max(0, Math.min(100, Number(rawValue)));
+    const otherKeys = SCOREBOARD_WEIGHT_FIELDS.map((f) => f.key).filter((k) => k !== changedKey);
+    const remaining = 100 - newValue;
+    const oldOtherTotal = otherKeys.reduce((sum, k) => sum + (weights[k] || 0), 0);
+
+    const updated = { ...weights, [changedKey]: newValue };
+    let assigned = 0;
+    otherKeys.forEach((k, i) => {
+      const isLast = i === otherKeys.length - 1;
+      if (isLast) {
+        updated[k] = remaining - assigned;
+      } else {
+        const share = oldOtherTotal > 0
+          ? Math.round((weights[k] / oldOtherTotal) * remaining)
+          : Math.round(remaining / otherKeys.length);
+        updated[k] = share;
+        assigned += share;
+      }
+    });
+
+    setWeights(updated);
+  }
+
+  async function handleSave() {
+    if (!isValid) return;
+    setSaving(true);
+    try {
+      await organizationApi.updateScoreboardWeights({
+        scoreboard_completion_weight: weights.scoreboard_completion_weight / 100,
+        scoreboard_on_time_weight: weights.scoreboard_on_time_weight / 100,
+        scoreboard_overdue_weight: weights.scoreboard_overdue_weight / 100,
+      });
+      toast.success("Scoreboard weights updated.");
+    } catch (err) {
+      toast.error(err.message || "Failed to update scoreboard weights.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <div className="mb-6">
+        <h2 className="text-xl font-bold text-slate-900">Scoreboard Weights</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Controls how much each factor contributes to an employee's Scoreboard score. Must add up to 100%.
+        </p>
+      </div>
+
+      <div className="space-y-6 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        {SCOREBOARD_WEIGHT_FIELDS.map((f) => (
+          <div key={f.key}>
+            <div className="mb-1.5 flex items-center justify-between">
+              <label className="text-sm font-semibold text-slate-800">{f.label}</label>
+              <span className="text-sm font-bold text-slate-900">{weights[f.key]}%</span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={weights[f.key]}
+              onChange={(e) => handleSliderChange(f.key, e.target.value)}
+              className="w-full accent-slate-900"
+            />
+            <p className="mt-1 text-xs text-slate-400">{f.description}</p>
+          </div>
+        ))}
+
+        <div className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+          isValid ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
+        }`}>
+          <span className={`text-sm font-semibold ${isValid ? "text-emerald-700" : "text-red-700"}`}>
+            Total: {total}%
+          </span>
+          {!isValid && (
+            <span className="text-xs text-red-600">Must equal 100%</span>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={!isValid || saving}
+          className="w-full rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {saving ? "Saving..." : "Save Weights"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function OrganizationPage() {
   const { user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const activeTab = searchParams.get("tab") || "core-values";
   const canManage = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+  const isAdmin = user?.role === "owner" || user?.role === "admin";
+  const tabs = isAdmin ? [...TABS, { id: "scoreboard-weights", label: "Scoreboard Weights" }] : TABS;
 
   function setTab(tabId) {
     setSearchParams({ tab: tabId });
@@ -1819,7 +1948,7 @@ export default function OrganizationPage() {
       {/* Tab nav */}
       <div className="mb-8 border-b border-slate-200">
         <nav className="flex gap-1">
-          {TABS.map((tab) => (
+          {tabs.map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -1840,6 +1969,7 @@ export default function OrganizationPage() {
       {activeTab === "core-values" && <CoreValuesTab canManage={canManage} />}
       {activeTab === "org-chart"   && <OrgChartTab canManage={canManage} />}
       {activeTab === "objectives"  && <ObjectivesTab canManage={canManage} />}
+      {activeTab === "scoreboard-weights" && isAdmin && <ScoreboardWeightsTab />}
     </div>
   );
 }

@@ -45,4 +45,12 @@ export const organizationApi = {
   deleteRole(id) {
     return apiClient.delete(`/organization/roles/${id}`);
   },
+
+  // Scoreboard scoring weights
+  getScoreboardWeights() {
+    return apiClient.get("/organizations/current/scoreboard-weights");
+  },
+  updateScoreboardWeights(payload) {
+    return apiClient.put("/organizations/current/scoreboard-weights", payload);
+  },
 };
