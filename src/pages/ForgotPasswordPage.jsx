@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { authApi } from "../api/authApi";
+import OtpBoxes from "../components/auth/OtpBoxes";
+import { PasswordStrengthBar, PasswordRequirementsChecklist } from "../components/auth/PasswordRequirements";
 
 function EyeIcon({ visible }) {
   if (visible) {
@@ -43,6 +45,7 @@ export default function ForgotPasswordPage() {
   const [confirmPasswordError, setConfirmPasswordError] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [passwordFocused, setPasswordFocused] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
 
@@ -72,6 +75,7 @@ export default function ForgotPasswordPage() {
       toast.success("OTP sent to your email.");
       setStep("otp");
       setResendCooldown(30);
+      setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
     } catch (err) {
       setEmailError(err.message || "Unable to send OTP.");
     } finally {
@@ -84,6 +88,7 @@ export default function ForgotPasswordPage() {
       await authApi.resendOtp({ email: email.trim().toLowerCase(), purpose: "reset_password" });
       toast.success("OTP resent successfully.");
       setResendCooldown(30);
+      setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
     } catch (err) {
       toast.error(err.message || "Unable to resend OTP.");
     }
@@ -157,8 +162,20 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
-      <div className="w-full max-w-md rounded-2xl bg-white p-8 shadow-sm">
+    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-100 via-slate-50 to-teal-50 px-4 py-12">
+      <div className="w-full max-w-md">
+
+        {/* Brand mark */}
+        <div className="mb-8 flex flex-col items-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-600 shadow-lg shadow-teal-200">
+            <svg className="h-6 w-6 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
+            </svg>
+          </div>
+          <p className="mt-3 text-sm font-semibold tracking-wide text-teal-700">Task Manager</p>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/60 bg-white px-8 py-9 shadow-xl shadow-slate-200/50">
         <div className="mb-8">
           <h1 className="text-2xl font-bold text-slate-900">{stepTitles[step]}</h1>
           <p className="mt-2 text-sm text-slate-600">{stepSubtitles[step]}</p>
@@ -194,16 +211,10 @@ export default function ForgotPasswordPage() {
         {step === "otp" && (
           <form onSubmit={handleOtpSubmit} noValidate className="space-y-5">
             <div>
-              <label htmlFor="fp-otp" className="mb-1 block text-sm font-medium text-slate-700">
+              <label className="mb-1 block text-sm font-medium text-slate-700">
                 OTP code
               </label>
-              <input
-                id="fp-otp"
-                value={otpCode}
-                onChange={(e) => { setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6)); setOtpError(""); }}
-                placeholder="Enter 6-digit OTP"
-                className={`${otpError ? inputErr : inputNormal} tracking-widest`}
-              />
+              <OtpBoxes value={otpCode} onChange={(v) => { setOtpCode(v); setOtpError(""); }} />
               <FieldError message={otpError} />
             </div>
             <button
@@ -244,6 +255,8 @@ export default function ForgotPasswordPage() {
                   autoComplete="new-password"
                   value={newPassword}
                   onChange={(e) => { setNewPassword(e.target.value); setNewPasswordError(""); }}
+                  onFocus={() => setPasswordFocused(true)}
+                  onBlur={() => setPasswordFocused(false)}
                   placeholder="At least 8 characters"
                   className={`${newPasswordError ? inputErr : inputNormal} pr-11`}
                 />
@@ -253,6 +266,13 @@ export default function ForgotPasswordPage() {
                 </button>
               </div>
               <FieldError message={newPasswordError} />
+
+              {newPassword.length > 0 && (
+                <PasswordStrengthBar password={newPassword} />
+              )}
+              {(passwordFocused || newPassword.length > 0) && (
+                <PasswordRequirementsChecklist password={newPassword} />
+              )}
             </div>
 
             <div>
@@ -275,6 +295,13 @@ export default function ForgotPasswordPage() {
                 </button>
               </div>
               <FieldError message={confirmPasswordError} />
+              {confirmPassword.length > 0 && (
+                <p className={`mt-1.5 text-xs font-medium ${
+                  confirmPassword === newPassword ? "text-emerald-600" : "text-red-500"
+                }`}>
+                  {confirmPassword === newPassword ? "Passwords match" : "Passwords do not match"}
+                </p>
+              )}
             </div>
 
             <button
@@ -320,6 +347,7 @@ export default function ForgotPasswordPage() {
             <Link to="/login" className="font-medium text-slate-900 hover:underline">Log in</Link>
           </p>
         )}
+        </div>
       </div>
     </div>
   );

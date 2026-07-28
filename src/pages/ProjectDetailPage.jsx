@@ -231,7 +231,11 @@ export default function ProjectDetailPage() {
       ];
 
       if (canCreateTasks) {
-        requests.push(userApi.list());
+        // userApi.list() is org-admin-only (GET /users); a Project Manager
+        // legitimately gets a 403 here. Don't let that sink the whole
+        // Promise.all and blank out the entire project page over it — just
+        // degrade to an empty assignee list.
+        requests.push(userApi.list().catch(() => []));
         requests.push(teamApi.list());
       }
 
