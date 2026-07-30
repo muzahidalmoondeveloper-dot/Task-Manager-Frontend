@@ -411,13 +411,31 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
 
 // ─── Issue row ────────────────────────────────────────────────────────────────
 
-function IssueRow({ issue, canManage, onEdit, onDelete, onArchive }) {
+function IssueRow({ issue, canManage, canToggleSolved, onEdit, onDelete, onArchive, onToggleSolved }) {
   const [detailOpen, setDetailOpen] = useState(false);
   const preview = stripHtml(issue.description);
   const assignee = issue.assignee;
+  const isSolved = issue.status === "resolved";
 
   return (
     <div className="group flex items-start gap-4 border-b border-slate-100 px-5 py-4 last:border-b-0 hover:bg-slate-50/60 transition-colors">
+      {/* Solved toggle */}
+      <button
+        type="button"
+        onClick={() => canToggleSolved && onToggleSolved(issue)}
+        disabled={!canToggleSolved}
+        title={isSolved ? "Mark as unsolved" : "Mark as solved"}
+        className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+          isSolved
+            ? "border-emerald-500 bg-emerald-500 text-white"
+            : `border-slate-300 text-transparent ${canToggleSolved ? "hover:border-emerald-400" : "cursor-not-allowed"}`
+        }`}
+      >
+        <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+          <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+        </svg>
+      </button>
+
       {/* Priority badge */}
       <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-xs font-bold ${PRIORITY_COLORS[issue.priority] || PRIORITY_COLORS[0]}`}>
         {issue.priority}
@@ -425,7 +443,7 @@ function IssueRow({ issue, canManage, onEdit, onDelete, onArchive }) {
 
       {/* Content */}
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 text-sm font-semibold text-slate-900 leading-snug">
+        <p className={`flex items-center gap-1.5 text-sm font-semibold leading-snug ${isSolved ? "text-slate-400 line-through" : "text-slate-900"}`}>
           {issue.icon && (
             <span className="shrink-0 text-slate-400">
               <RockIconDisplay iconStr={issue.icon} size={14} />
@@ -501,6 +519,7 @@ function IssueRow({ issue, canManage, onEdit, onDelete, onArchive }) {
           ownerUser={issue.assignee}
           ownerLabel="Assignee"
           description={preview}
+          canManage={canToggleSolved}
           onClose={() => setDetailOpen(false)}
         />
       )}
@@ -630,6 +649,17 @@ export default function IssuesTab({ team, canManage }) {
     }
   }
 
+  async function handleToggleSolved(issue) {
+    const nextStatus = issue.status === "resolved" ? "open" : "resolved";
+    try {
+      const updated = await issueApi.update(team.id, issue.id, { status: nextStatus });
+      setIssues((prev) => prev.map((i) => (i.id === issue.id ? updated : i)));
+      toast.success(nextStatus === "resolved" ? "Issue marked as solved." : "Issue reopened.");
+    } catch (err) {
+      toast.error(err.message || "Failed to update issue.");
+    }
+  }
+
   function openCreate() { setEditing(null); setShowModal(true); }
   function openEdit(issue) { setEditing(issue); setShowModal(true); }
 
@@ -689,9 +719,11 @@ export default function IssuesTab({ team, canManage }) {
               key={issue.id}
               issue={issue}
               canManage={canManage}
+              canToggleSolved={canManage || issue.assignee?.id === user?.id}
               onEdit={openEdit}
               onDelete={handleDelete}
               onArchive={handleArchive}
+              onToggleSolved={handleToggleSolved}
             />
           ))}
         </div>

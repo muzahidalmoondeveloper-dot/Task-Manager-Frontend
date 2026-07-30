@@ -1215,7 +1215,7 @@ function RecordValueModal({ kpi, period, entry, teamId, onClose, onSaved }) {
 
 // ─── Value cell (click to open modal) ────────────────────────────────────────
 
-function ValueCell({ value, derivedValue, targetType, onClick }) {
+function ValueCell({ value, derivedValue, targetType, onClick, disabled }) {
   const isDerived = value == null && derivedValue != null;
   const display = value != null
     ? formatKpiValue(value, targetType)
@@ -1223,11 +1223,11 @@ function ValueCell({ value, derivedValue, targetType, onClick }) {
       ? `≈ ${formatKpiValue(derivedValue, targetType)}`
       : null;
   return (
-    <button type="button" onClick={onClick}
-      title={isDerived ? "Interpolated from finer-grained values — click to record an actual value" : undefined}
-      className={`w-20 rounded border border-dashed border-slate-200 py-0.5 text-center text-sm hover:border-slate-400 hover:bg-slate-50 transition-colors ${
-        isDerived ? "italic text-slate-400" : "text-slate-700"
-      }`}>
+    <button type="button" onClick={onClick} disabled={disabled}
+      title={disabled ? undefined : isDerived ? "Interpolated from finer-grained values — click to record an actual value" : undefined}
+      className={`w-20 rounded border border-dashed border-slate-200 py-0.5 text-center text-sm transition-colors ${
+        disabled ? "cursor-default" : "hover:border-slate-400 hover:bg-slate-50"
+      } ${isDerived ? "italic text-slate-400" : "text-slate-700"}`}>
       {display ?? <span className="text-slate-300">—</span>}
     </button>
   );
@@ -1380,6 +1380,8 @@ function KpiActionsMenu({ kpi, teamId, onEdit, onDelete, onToggleSnooze }) {
 // ─── KPI row ──────────────────────────────────────────────────────────────────
 
 function KPIRow({ kpi, index, isDragOver, teamId, view, periods, canManage, onEdit, onDelete, onTrend, onEntrySaved, onOpenRecord, onToggleSnooze, onDragStart, onDragOver, onDrop, onDragEnd, onOwnerClick, ownerSelected }) {
+  const { user } = useAuth();
+  const canRecordValue = canManage || kpi.owner?.id === user?.id;
   const [detailOpen, setDetailOpen] = useState(false);
   const isNew = Date.now() - new Date(kpi.created_at).getTime() < 7 * 24 * 60 * 60 * 1000;
 
@@ -1503,6 +1505,7 @@ function KPIRow({ kpi, index, isDragOver, teamId, view, periods, canManage, onEd
             derivedValue={forecastPeriod ? derivedMap[forecastPeriod.key]?.value : null}
             targetType={kpi.target_type}
             onClick={() => onOpenRecord(kpi, { ...forecastPeriod, type: view }, forecastEntry)}
+            disabled={!canRecordValue}
           />
           {forecastBadge && (
             <span className="text-[10px] font-semibold text-orange-500">{forecastBadge}</span>
@@ -1525,6 +1528,7 @@ function KPIRow({ kpi, index, isDragOver, teamId, view, periods, canManage, onEd
             derivedValue={derivedMap[p.key]?.value}
             targetType={kpi.target_type}
             onClick={() => onOpenRecord(kpi, { ...p, type: view }, entryMap[p.key])}
+            disabled={!canRecordValue}
           />
         </td>
       ))}
@@ -1553,6 +1557,7 @@ function KPIRow({ kpi, index, isDragOver, teamId, view, periods, canManage, onEd
           createdAt={kpi.created_at}
           ownerUser={kpi.owner}
           description={kpi.description}
+          canManage={canRecordValue}
           onClose={() => setDetailOpen(false)}
         />
       )}

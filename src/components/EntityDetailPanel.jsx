@@ -144,7 +144,7 @@ function MilestoneFormModal({ initial, users, onCancel, onSubmit, isSaving }) {
   );
 }
 
-function MilestoneEditor({ teamId, rockId, milestones, users, onMilestonesChange }) {
+function MilestoneEditor({ teamId, rockId, milestones, users, onMilestonesChange, canManage }) {
   const [formTarget, setFormTarget] = useState(null); // null = closed, "new" = add, milestone object = edit
   const [isSaving, setIsSaving] = useState(false);
 
@@ -200,13 +200,15 @@ function MilestoneEditor({ teamId, rockId, milestones, users, onMilestonesChange
           <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-500">Milestones</h3>
           <p className="text-xs text-slate-400">{completed}/{milestones.length} complete</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setFormTarget("new")}
-          className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          + Add milestone
-        </button>
+        {canManage && (
+          <button
+            type="button"
+            onClick={() => setFormTarget("new")}
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            + Add milestone
+          </button>
+        )}
       </div>
 
       {milestones.length === 0 ? (
@@ -219,10 +221,11 @@ function MilestoneEditor({ teamId, rockId, milestones, users, onMilestonesChange
             <li key={ms.id} className="flex items-center gap-2 rounded-lg border border-slate-100 px-2.5 py-2">
               <button
                 type="button"
-                onClick={() => handleToggle(ms)}
+                onClick={() => canManage && handleToggle(ms)}
+                disabled={!canManage}
                 className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px] transition-colors ${
                   ms.status === "complete" ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-400 text-transparent hover:border-indigo-400"
-                }`}
+                } ${!canManage ? "cursor-default" : ""}`}
               >
                 ✓
               </button>
@@ -231,16 +234,20 @@ function MilestoneEditor({ teamId, rockId, milestones, users, onMilestonesChange
                 {ms.title}
               </span>
               <span className="shrink-0 text-xs text-slate-400">{formatDate(ms.due_date) || "No due date"}</span>
-              <button type="button" onClick={() => setFormTarget(ms)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
-                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
-                </svg>
-              </button>
-              <button type="button" onClick={() => handleDelete(ms)} className="shrink-0 rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600">
-                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482 41.03 41.03 0 00-2.365-.298V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4z" clipRule="evenodd" />
-                </svg>
-              </button>
+              {canManage && (
+                <>
+                  <button type="button" onClick={() => setFormTarget(ms)} className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M5.433 13.917l1.262-3.155A4 4 0 017.58 9.42l6.92-6.918a2.121 2.121 0 013 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 01-.65-.65z" />
+                    </svg>
+                  </button>
+                  <button type="button" onClick={() => handleDelete(ms)} className="shrink-0 rounded p-1 text-red-400 hover:bg-red-50 hover:text-red-600">
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.443c-.795.077-1.584.176-2.365.298a.75.75 0 10.23 1.482l.149-.022.841 10.518A2.75 2.75 0 007.596 19h4.807a2.75 2.75 0 002.742-2.53l.841-10.52.149.023a.75.75 0 00.23-1.482 41.03 41.03 0 00-2.365-.298V3.75A2.75 2.75 0 0011.25 1h-2.5zM10 4c.84 0 1.673.025 2.5.075V3.75c0-.69-.56-1.25-1.25-1.25h-2.5c-.69 0-1.25.56-1.25 1.25v.325C8.327 4.025 9.16 4 10 4z" clipRule="evenodd" />
+                    </svg>
+                  </button>
+                </>
+              )}
             </li>
           ))}
         </ul>
@@ -279,6 +286,7 @@ export default function EntityDetailPanel({
   milestones,
   milestoneUsers,
   onMilestonesChange,
+  canManage = false,
   onClose,
 }) {
   const { user } = useAuth();
@@ -379,7 +387,7 @@ export default function EntityDetailPanel({
           </div>
 
           {milestones !== undefined && (
-            <MilestoneEditor teamId={teamId} rockId={entityId} milestones={milestones} users={milestoneUsers} onMilestonesChange={onMilestonesChange} />
+            <MilestoneEditor teamId={teamId} rockId={entityId} milestones={milestones} users={milestoneUsers} onMilestonesChange={onMilestonesChange} canManage={canManage} />
           )}
 
           <div>
@@ -427,23 +435,25 @@ export default function EntityDetailPanel({
               </ul>
             )}
 
-            <div className="mt-3">
-              <textarea
-                value={draftNote}
-                onChange={(e) => setDraftNote(e.target.value)}
-                rows={3}
-                placeholder="Add context, updates, or reminders..."
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-              />
-              <button
-                type="button"
-                onClick={handleAddNote}
-                disabled={isSubmittingNote || !draftNote.trim()}
-                className="mt-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-              >
-                {isSubmittingNote ? "Adding..." : "Add note"}
-              </button>
-            </div>
+            {canManage && (
+              <div className="mt-3">
+                <textarea
+                  value={draftNote}
+                  onChange={(e) => setDraftNote(e.target.value)}
+                  rows={3}
+                  placeholder="Add context, updates, or reminders..."
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleAddNote}
+                  disabled={isSubmittingNote || !draftNote.trim()}
+                  className="mt-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {isSubmittingNote ? "Adding..." : "Add note"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>

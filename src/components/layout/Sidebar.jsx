@@ -671,7 +671,8 @@ function SidebarContent({
     user?.role === "owner" ||
     user?.role === "admin" ||
     user?.role === "team_manager" ||
-    user?.role === "project_manager";
+    user?.role === "project_manager" ||
+    user?.role === "team_member";
 
   const isTeamMember = user?.role === "team_member";
 

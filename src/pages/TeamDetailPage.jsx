@@ -23,6 +23,7 @@ import KPIsTab from "./KPIsTab";
 import IssuesTab from "./IssuesTab";
 import MeetingsTab from "./MeetingsTab";
 import TeamScoreboardTab from "./TeamScoreboardTab";
+import MyTeamScoreboardTab from "./MyTeamScoreboardTab";
 import RichEditor from "../components/RichEditor";
 
 function stripHtml(html) {
@@ -758,6 +759,7 @@ function NewsTab({ team, canManage }) {
           createdAt={detailItem.created_at}
           ownerUser={detailItem.owner}
           description={stripHtml(detailItem.body)}
+          canManage={canManage}
           onClose={() => setDetailItem(null)}
         />
       )}
@@ -1440,7 +1442,9 @@ export default function TeamDetailPage() {
       )}
 
       {activeTab === "scoreboard" && (
-        <TeamScoreboardTab team={team} />
+        user?.role === "team_member"
+          ? <MyTeamScoreboardTab team={team} userId={user.id} />
+          : <TeamScoreboardTab team={team} />
       )}
 
       {celebrationData && (
