@@ -62,6 +62,66 @@ function Avatar({ name, size = "h-7 w-7" }) {
   );
 }
 
+function AttendanceAvatar({ name, joined, onClick, disabled, title }) {
+  const idx = name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      disabled={disabled}
+      className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-opacity ${disabled ? "cursor-default" : "hover:opacity-90"}`}
+    >
+      <span className={`flex h-11 w-11 items-center justify-center rounded-full text-white ${joined ? AVATAR_COLORS[idx] : "bg-slate-300"}`}>
+        {getInitials(name)}
+      </span>
+      {joined && (
+        <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
+      )}
+    </button>
+  );
+}
+
+function SpeakingOrderAvatar({ name, state, onClick }) {
+  // state: "current" | "flashing" | "done" | "skipped" | "waiting"
+  const idx = name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0;
+  const ringCls =
+    state === "current" ? "border-emerald-500" :
+    state === "flashing" ? "border-amber-400 animate-pulse" :
+    "border-transparent";
+  const bgCls = state === "current" || state === "flashing" ? AVATAR_COLORS[idx] : "bg-slate-300";
+  const label =
+    state === "current" ? "Speak now. Click when done." :
+    state === "flashing" ? "Selecting…" :
+    state === "done" ? "Spoke" :
+    state === "skipped" ? "Skipped" : "Waiting";
+  const labelCls =
+    state === "current" ? "text-emerald-600" :
+    state === "flashing" ? "text-amber-600" :
+    state === "skipped" ? "text-slate-400 italic" :
+    "text-slate-400";
+
+  return (
+    <div className="flex w-24 flex-col items-center gap-1.5 text-center">
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={state !== "current"}
+        className={`relative flex h-16 w-16 items-center justify-center rounded-full border-4 transition-all ${ringCls} ${state === "current" ? "cursor-pointer" : "cursor-default"}`}
+      >
+        <span className={`flex h-14 w-14 items-center justify-center rounded-full text-sm font-semibold text-white ${bgCls}`}>
+          {getInitials(name)}
+        </span>
+        {state === "current" && (
+          <span className="absolute -top-0.5 -right-0.5 h-4 w-4 rounded-full border-2 border-white bg-emerald-500" />
+        )}
+      </button>
+      <p className="max-w-full truncate text-xs font-medium text-slate-700">{name}</p>
+      <p className={`text-[11px] font-medium ${labelCls}`}>{label}</p>
+    </div>
+  );
+}
+
 function toLocalDatetimeValue(isoStr) {
   if (!isoStr) return "";
   const d = new Date(isoStr);
@@ -71,7 +131,7 @@ function toLocalDatetimeValue(isoStr) {
 
 // ─── Drag & Drop reorder for agenda ──────────────────────────────────────────
 
-function AgendaList({ items, onUpdate, onDelete, onReorder, canManage, liveMeetingId }) {
+function AgendaList({ items, onUpdate, onDelete, onReorder, canManage, liveMeetingId, currentItemId }) {
   const dragItem = useRef(null);
   const dragOver = useRef(null);
 
@@ -100,6 +160,7 @@ function AgendaList({ items, onUpdate, onDelete, onReorder, canManage, liveMeeti
           idx={idx}
           canManage={canManage}
           isLive={liveMeetingId != null}
+          isCurrent={item.id === currentItemId}
           onUpdate={onUpdate}
           onDelete={onDelete}
           onDragStart={() => handleDragStart(idx)}
@@ -111,7 +172,7 @@ function AgendaList({ items, onUpdate, onDelete, onReorder, canManage, liveMeeti
   );
 }
 
-function AgendaItem({ item, canManage, isLive, onUpdate, onDelete, onDragStart, onDragEnter, onDrop }) {
+function AgendaItem({ item, canManage, isLive, isCurrent, onUpdate, onDelete, onDragStart, onDragEnter, onDrop }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(item.title);
   const [dur, setDur] = useState(String(item.duration_minutes || ""));
@@ -135,8 +196,15 @@ function AgendaItem({ item, canManage, isLive, onUpdate, onDelete, onDragStart, 
       onDragEnter={onDragEnter}
       onDrop={onDrop}
       onDragOver={(e) => e.preventDefault()}
-      className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 shadow-sm"
+      className={`flex items-center gap-2 rounded-xl border bg-white px-3 py-2 shadow-sm ${
+        isCurrent ? "border-teal-400 ring-1 ring-teal-200" : "border-slate-200"
+      }`}
     >
+      {isCurrent && (
+        <span className="shrink-0 rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-teal-700">
+          Current
+        </span>
+      )}
       {canManage && (
         <svg className="h-4 w-4 shrink-0 cursor-grab text-slate-300" viewBox="0 0 20 20" fill="currentColor">
           <path d="M7 2a2 2 0 110 4 2 2 0 010-4zm6 0a2 2 0 110 4 2 2 0 010-4zM7 8a2 2 0 110 4 2 2 0 010-4zm6 0a2 2 0 110 4 2 2 0 010-4zm-6 6a2 2 0 110 4 2 2 0 010-4zm6 0a2 2 0 110 4 2 2 0 010-4z" />
@@ -356,17 +424,127 @@ function MeetingModal({ meeting, teamMembers, onSave, onClose }) {
   );
 }
 
+// ─── Score Modal (Wrap Up) ────────────────────────────────────────────────────
+
+function ScoreModal({ participant, onClose, onSubmit }) {
+  const [score, setScore] = useState(participant.score != null ? String(participant.score) : "");
+  const [note, setNote] = useState(participant.score_note || "");
+  const [saving, setSaving] = useState(false);
+  const numericScore = Number(score);
+  const isValid = score !== "" && !Number.isNaN(numericScore) && numericScore >= 1 && numericScore <= 10;
+
+  async function handleSubmit() {
+    if (!isValid) {
+      toast.error("Enter a score between 1 and 10.");
+      return;
+    }
+    setSaving(true);
+    await onSubmit(Math.round(numericScore * 10) / 10, note.trim());
+    setSaving(false);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+          <h3 className="text-base font-semibold text-slate-900">Rate this meeting</h3>
+          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
+            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+            </svg>
+          </button>
+        </div>
+        <div className="p-5">
+          <p className="mb-3 text-sm text-slate-600">
+            Submit a score for {participant.user?.full_name || participant.user?.email}.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
+              <button
+                key={n}
+                type="button"
+                onClick={() => setScore(String(n))}
+                className={`flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-medium transition-colors ${
+                  Number(score) === n
+                    ? "border-teal-600 bg-teal-600 text-white"
+                    : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                {n}
+              </button>
+            ))}
+            <input
+              type="text"
+              inputMode="decimal"
+              value={score}
+              onChange={(e) => setScore(e.target.value)}
+              placeholder="7.8"
+              className="h-9 w-16 rounded-lg border border-slate-300 px-2 text-center text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+            />
+          </div>
+          <p className="mt-1.5 text-xs text-slate-400">Use up to one decimal place, for example 7.8.</p>
+
+          <label className="mb-1.5 mt-4 block text-sm font-medium text-slate-700">Motivation for that score (optional)</label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="Share quick feedback for the team…"
+            className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+          />
+        </div>
+        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
+          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
+          <button
+            onClick={handleSubmit}
+            disabled={saving || !isValid}
+            className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+          >
+            {saving ? "Submitting…" : "Submit rating"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Live Meeting Panel ───────────────────────────────────────────────────────
 
-function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
+function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
+  const { user } = useAuth();
   const [elapsed, setElapsed] = useState(0);
   const [newAgendaTitle, setNewAgendaTitle] = useState("");
   const [noteContent, setNoteContent] = useState("");
   const [decisionContent, setDecisionContent] = useState("");
   const [taskName, setTaskName] = useState("");
   const [activeSection, setActiveSection] = useState("agenda");
+  const [checkinSpinning, setCheckinSpinning] = useState(false);
+  const [checkinFlashId, setCheckinFlashId] = useState(null);
+  const [manualSpeakerId, setManualSpeakerId] = useState("");
+  const [scoringFor, setScoringFor] = useState(null); // participant object whose score modal is open
   const autoSaveTimer = useRef(null);
   const savedNoteId = useRef(null);
+  const checkinSpinningRef = useRef(false);
+  useEffect(() => { checkinSpinningRef.current = checkinSpinning; }, [checkinSpinning]);
+
+  // Near-real-time sync: while this panel is open, poll for changes made by
+  // anyone else viewing the same meeting (attendance, speaking order, agenda,
+  // notes, decisions), so updates don't require a manual page refresh. No
+  // websocket/SSE infra exists in this app; this mirrors the only existing
+  // real-time-ish pattern (the notifications poll in AppLayout.jsx).
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (checkinSpinningRef.current) return; // don't clobber the shuffle animation mid-spin
+      try {
+        const fresh = await meetingApi.get(teamId, meeting.id);
+        onUpdate(fresh);
+      } catch {
+        // transient poll failure — stay silent, next tick will retry
+      }
+    }, 4000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamId, meeting.id]);
 
   // Timer
   useEffect(() => {
@@ -393,8 +571,87 @@ function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
     try {
       const updated = await meetingApi[action](teamId, meeting.id);
       onUpdate(updated);
+    } catch (err) {
+      toast.error(err.message || "Action failed");
+    }
+  }
+
+  async function toggleJoined(participant) {
+    const joined = !participant.joined_at;
+    try {
+      const updated = await meetingApi.setParticipantJoined(teamId, meeting.id, participant.user_id, joined);
+      onUpdate({
+        ...meeting,
+        participants: meeting.participants.map((p) => (p.id === updated.id ? updated : p)),
+      });
     } catch {
-      toast.error("Action failed");
+      toast.error("Failed to update attendance");
+    }
+  }
+
+  const checkinPool = meeting.participants.filter((p) => p.joined_at);
+
+  async function runSpin(apiCall) {
+    if (checkinSpinning) return;
+    setCheckinSpinning(true);
+
+    const candidates = checkinPool.filter(
+      (p) => !p.spoken_at && p.id !== meeting.checkin_current_participant_id
+    );
+    if (candidates.length > 0) {
+      const flashDuration = 1100;
+      const flashInterval = setInterval(() => {
+        setCheckinFlashId(candidates[Math.floor(Math.random() * candidates.length)].id);
+      }, 120);
+      await new Promise((resolve) => setTimeout(resolve, flashDuration));
+      clearInterval(flashInterval);
+    }
+    setCheckinFlashId(null);
+
+    try {
+      const updated = await apiCall();
+      onUpdate(updated);
+    } catch (err) {
+      toast.error(err.message || "Failed to update speaking order.");
+    } finally {
+      setCheckinSpinning(false);
+    }
+  }
+
+  function advanceCheckin() {
+    return runSpin(() => meetingApi.checkinNext(teamId, meeting.id));
+  }
+
+  function skipCheckin() {
+    return runSpin(() => meetingApi.checkinSkip(teamId, meeting.id));
+  }
+
+  async function selectSpeaker() {
+    if (!manualSpeakerId) return;
+    try {
+      const updated = await meetingApi.checkinSelect(teamId, meeting.id, Number(manualSpeakerId));
+      onUpdate(updated);
+      setManualSpeakerId("");
+    } catch (err) {
+      toast.error(err.message || "Failed to set speaker.");
+    }
+  }
+
+  async function resetCheckin() {
+    try {
+      const updated = await meetingApi.checkinReset(teamId, meeting.id);
+      onUpdate(updated);
+    } catch {
+      toast.error("Failed to reset check-in.");
+    }
+  }
+
+  async function advanceAgenda() {
+    try {
+      const updated = await meetingApi.advanceAgenda(teamId, meeting.id);
+      onUpdate(updated);
+    } catch {
+      toast.error("Failed to advance agenda.");
     }
   }
 
@@ -502,7 +759,21 @@ function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
     { id: "notes", label: "Notes" },
     { id: "decisions", label: "Decisions" },
     { id: "tasks", label: "Tasks" },
+    { id: "wrapup", label: "Wrap Up" },
   ];
+
+  async function submitScore(userId, score, note) {
+    try {
+      const updated = await meetingApi.setParticipantScore(teamId, meeting.id, userId, score, note || null);
+      onUpdate({
+        ...meeting,
+        participants: meeting.participants.map((p) => (p.id === updated.id ? updated : p)),
+      });
+      setScoringFor(null);
+    } catch (err) {
+      toast.error(err.message || "Failed to submit score.");
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch bg-black/50">
@@ -538,16 +809,19 @@ function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
               <p className="mt-0.5 text-xs text-slate-400">{fmtDuration(meeting.duration_minutes)} planned</p>
             </div>
             <div className="flex gap-2">
-              {meeting.status === "scheduled" && (
-                <button onClick={() => lifecycle("start")} className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700">Start</button>
+              {!canManage && meeting.status !== "completed" && (
+                <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-500">Only the host can control this meeting.</span>
               )}
-              {meeting.status === "ongoing" && (
+              {canManage && meeting.status === "scheduled" && (
+                <button onClick={() => lifecycle("start")} className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700">Start Meeting</button>
+              )}
+              {canManage && meeting.status === "ongoing" && (
                 <>
                   <button onClick={() => lifecycle("pause")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100">Pause</button>
                   <button onClick={() => lifecycle("end")} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">End</button>
                 </>
               )}
-              {meeting.status === "paused" && (
+              {canManage && meeting.status === "paused" && (
                 <>
                   <button onClick={() => lifecycle("resume")} className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700">Resume</button>
                   <button onClick={() => lifecycle("end")} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">End</button>
@@ -559,6 +833,155 @@ function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
             </div>
           </div>
         </div>
+
+        {/* Stage 1: Attendance — shown while scheduled (always, for any meeting type) */}
+        {meeting.participants.length > 0 && (meeting.meeting_type !== "l10" || meeting.status === "scheduled") && (() => {
+          const joinedCount = meeting.participants.filter((p) => p.joined_at).length;
+          const pct = Math.round((joinedCount / meeting.participants.length) * 100);
+          return (
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Meeting Attendance</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                Click your own avatar to join.
+                {canManage && " As the host, click any attendee's avatar to check them in or remove them."}
+              </p>
+              <div className="mt-3 flex items-center justify-between text-xs">
+                <span className="text-slate-500">
+                  {joinedCount} of {meeting.participants.length} team members joined
+                </span>
+                <span className="font-semibold text-slate-700">{pct}%</span>
+              </div>
+              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+              </div>
+              <div className="mt-3 flex flex-wrap gap-3">
+                {meeting.participants.map((p) => {
+                  const isSelf = p.user_id === user?.id;
+                  const canClick = isSelf || canManage;
+                  return (
+                    <AttendanceAvatar
+                      key={p.id}
+                      name={p.user?.full_name || p.user?.email}
+                      joined={Boolean(p.joined_at)}
+                      onClick={() => {
+                        if (!canClick) return;
+                        toggleJoined(p);
+                      }}
+                      disabled={!canClick}
+                      title={
+                        isSelf
+                          ? (p.joined_at ? "Click to leave the meeting." : "Click to join the meeting.")
+                          : canManage
+                          ? (p.joined_at ? `${p.user?.full_name || p.user?.email} — joined. Click to remove.` : `${p.user?.full_name || p.user?.email} — not joined. Click to check them in.`)
+                          : p.user?.full_name || p.user?.email
+                      }
+                    />
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Stage 2: Speaking Order (L10 personal check-in) — replaces Attendance once the meeting starts */}
+        {meeting.meeting_type === "l10" && meeting.status !== "scheduled" && (() => {
+          const allSpoken = checkinPool.length > 0 && checkinPool.every((p) => p.spoken_at);
+          const hasStarted = meeting.checkin_current_participant_id || checkinPool.some((p) => p.spoken_at);
+          const remainingCandidates = checkinPool.filter(
+            (p) => !p.spoken_at && p.id !== meeting.checkin_current_participant_id
+          );
+
+          return (
+            <div className="border-b border-slate-200 px-6 py-4">
+              <h3 className="text-sm font-semibold text-slate-900">Speaking Order</h3>
+              <p className="mt-1 text-xs text-slate-500">
+                The roulette picks who speaks next. Once that person is done, click their avatar (or Complete) to spin again for the remaining attendees.
+              </p>
+              {checkinPool.length === 0 ? (
+                <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                  No joined participants to speak.
+                </p>
+              ) : (
+                <>
+                  <div className="mt-4 flex flex-wrap gap-4">
+                    {checkinPool.map((p) => {
+                      const isCurrent = p.id === meeting.checkin_current_participant_id;
+                      const isFlashing = checkinSpinning && p.id === checkinFlashId;
+                      const state = isCurrent ? "current" : isFlashing ? "flashing" : p.spoken_at ? (p.skipped ? "skipped" : "done") : "waiting";
+                      return (
+                        <SpeakingOrderAvatar
+                          key={p.id}
+                          name={p.user?.full_name || p.user?.email}
+                          state={state}
+                          onClick={() => isCurrent && !checkinSpinning && advanceCheckin()}
+                        />
+                      );
+                    })}
+                  </div>
+                  <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${allSpoken && !checkinSpinning ? "bg-emerald-50 font-semibold text-emerald-700" : "bg-slate-50 text-slate-500"}`}>
+                    {checkinSpinning
+                      ? "Picking the next speaker…"
+                      : meeting.checkin_current_participant_id
+                      ? "Click the highlighted avatar, or Complete, once that person has finished speaking."
+                      : allSpoken
+                      ? "Speaking round completed"
+                      : "Start the check-in to pick the first speaker."}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    {!meeting.checkin_current_participant_id && !allSpoken && (
+                      <button type="button" onClick={advanceCheckin} disabled={checkinSpinning}
+                        className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
+                        {checkinSpinning ? "Picking…" : "Start Check-in"}
+                      </button>
+                    )}
+                    {meeting.checkin_current_participant_id && (
+                      <>
+                        <button type="button" onClick={advanceCheckin} disabled={checkinSpinning}
+                          className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
+                          Complete
+                        </button>
+                        <button type="button" onClick={skipCheckin} disabled={checkinSpinning}
+                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+                          Skip
+                        </button>
+                      </>
+                    )}
+                    {hasStarted && (
+                      <button type="button" onClick={resetCheckin} disabled={checkinSpinning}
+                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+                        Restart Round
+                      </button>
+                    )}
+                    {allSpoken && !checkinSpinning && (
+                      <button type="button" onClick={() => setActiveSection("agenda")}
+                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
+                        Continue to Agenda
+                      </button>
+                    )}
+                    {remainingCandidates.length > 0 && (
+                      <div className="ml-auto flex items-center gap-1.5">
+                        <select
+                          value={manualSpeakerId}
+                          onChange={(e) => setManualSpeakerId(e.target.value)}
+                          className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-700 focus:outline-none"
+                        >
+                          <option value="">Pick speaker manually…</option>
+                          {remainingCandidates.map((p) => (
+                            <option key={p.id} value={p.user_id}>{p.user?.full_name || p.user?.email}</option>
+                          ))}
+                        </select>
+                        <button type="button" onClick={selectSpeaker} disabled={!manualSpeakerId || checkinSpinning}
+                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+                          Set
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Section nav */}
         <div className="flex border-b border-slate-200 px-6">
@@ -587,24 +1010,42 @@ function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
         <div className="flex-1 overflow-y-auto p-6">
           {activeSection === "agenda" && (
             <div className="space-y-4">
+              {meeting.status !== "scheduled" && meeting.agenda_items.length > 0 && (
+                <div className="flex items-center justify-between rounded-xl border border-teal-200 bg-teal-50 px-3 py-2">
+                  <span className="text-xs text-teal-700">
+                    {meeting.current_agenda_item_id
+                      ? `Current: ${meeting.agenda_items.find((a) => a.id === meeting.current_agenda_item_id)?.title || "—"}`
+                      : "All agenda items complete."}
+                  </span>
+                  {canManage && (
+                    <button onClick={advanceAgenda}
+                      className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700">
+                      Next Agenda Item
+                    </button>
+                  )}
+                </div>
+              )}
               <AgendaList
                 items={meeting.agenda_items}
-                canManage
+                canManage={canManage}
                 liveMeetingId={meeting.id}
+                currentItemId={meeting.current_agenda_item_id}
                 onUpdate={updateAgendaItem}
                 onDelete={deleteAgendaItem}
                 onReorder={reorderAgenda}
               />
-              <div className="flex gap-2">
-                <input
-                  value={newAgendaTitle}
-                  onChange={(e) => setNewAgendaTitle(e.target.value)}
-                  placeholder="New agenda item…"
-                  onKeyDown={(e) => e.key === "Enter" && addAgendaItem()}
-                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <button onClick={addAgendaItem} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">Add</button>
-              </div>
+              {canManage && (
+                <div className="flex gap-2">
+                  <input
+                    value={newAgendaTitle}
+                    onChange={(e) => setNewAgendaTitle(e.target.value)}
+                    placeholder="New agenda item…"
+                    onKeyDown={(e) => e.key === "Enter" && addAgendaItem()}
+                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
+                  />
+                  <button onClick={addAgendaItem} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">Add</button>
+                </div>
+              )}
             </div>
           )}
 
@@ -688,8 +1129,57 @@ function LiveMeetingPanel({ meeting, teamId, onUpdate, onClose }) {
               </div>
             </div>
           )}
+
+          {activeSection === "wrapup" && (
+            <div className="space-y-4">
+              <div>
+                <h4 className="text-sm font-semibold text-slate-900">Attendee scores</h4>
+                <p className="mt-1 text-xs text-slate-500">Scores update as soon as attendees submit.</p>
+              </div>
+              {meeting.participants.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-400">
+                  No participants on this meeting.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {meeting.participants.map((p) => {
+                    const isSelf = p.user_id === user?.id;
+                    return (
+                      <div key={p.id} className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 ${isSelf ? "border-teal-300 bg-teal-50/40" : "border-slate-200"}`}>
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <Avatar name={p.user?.full_name || p.user?.email} />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-slate-900">{p.user?.full_name || p.user?.email}</p>
+                            <p className="text-xs text-slate-400">{p.score != null ? `Score: ${p.score}` : "Score: Not scored yet"}</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => isSelf && setScoringFor(p)}
+                          disabled={!isSelf}
+                          className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
+                            isSelf ? "border-slate-300 text-slate-700 hover:bg-slate-50" : "cursor-default border-slate-100 text-slate-300"
+                          }`}
+                        >
+                          Score
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
+
+      {scoringFor && (
+        <ScoreModal
+          participant={scoringFor}
+          onClose={() => setScoringFor(null)}
+          onSubmit={(score, note) => submitScore(scoringFor.user_id, score, note)}
+        />
+      )}
     </div>
   );
 }
@@ -1032,6 +1522,7 @@ export default function MeetingsTab({ team, canManage }) {
         <LiveMeetingPanel
           meeting={liveMeeting}
           teamId={team.id}
+          canManage={canManage}
           onUpdate={handleUpdate}
           onClose={() => setLiveMeeting(null)}
         />

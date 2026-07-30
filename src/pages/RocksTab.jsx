@@ -630,6 +630,8 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
 // ─── Rock row ─────────────────────────────────────────────────────────────────
 
 function RockRow({ rock, users, canManage, onEdit, onDelete, onArchive, onStatusChange, onMilestoneToggle, onRockUpdated, noteCount = 0, onNotesPanelClose }) {
+  const { user } = useAuth();
+  const canEditRock = canManage || rock.owner?.id === user?.id;
   const [expanded, setExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPos, setMenuPos] = useState(null);
@@ -666,7 +668,7 @@ function RockRow({ rock, users, canManage, onEdit, onDelete, onArchive, onStatus
         </td>
         {/* Status */}
         <td className="py-3 pr-3 w-36">
-          <StatusBadge status={rock.status} editable={canManage} onChange={(s) => onStatusChange(rock, s)} />
+          <StatusBadge status={rock.status} editable={canEditRock} onChange={(s) => onStatusChange(rock, s)} />
         </td>
         {/* Rock name */}
         <td className="py-3 pr-3">
@@ -776,10 +778,11 @@ function RockRow({ rock, users, canManage, onEdit, onDelete, onArchive, onStatus
             <td className="py-2 pr-3 pl-6">
               <div className="flex items-center gap-2">
                 <button type="button"
-                  onClick={() => onMilestoneToggle(rock, ms.id)}
+                  onClick={() => canEditRock && onMilestoneToggle(rock, ms.id)}
+                  disabled={!canEditRock}
                   className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px] transition-colors ${
                     ms.status === "complete" ? "bg-indigo-600 border-indigo-600 text-white" : "border-slate-400 text-transparent hover:border-indigo-400"
-                  }`}>✓</button>
+                  } ${!canEditRock ? "cursor-default" : ""}`}>✓</button>
                 <span className={`text-xs ${ms.status === "complete" ? "text-slate-400 line-through" : "text-slate-700"}`}>{ms.title}</span>
               </div>
             </td>
@@ -809,6 +812,7 @@ function RockRow({ rock, users, canManage, onEdit, onDelete, onArchive, onStatus
           milestones={rock.milestones}
           milestoneUsers={users}
           onMilestonesChange={(newMilestones) => onRockUpdated?.({ ...rock, milestones: newMilestones })}
+          canManage={canEditRock}
           onClose={() => { setDetailOpen(false); onNotesPanelClose?.(); }}
         />
       )}

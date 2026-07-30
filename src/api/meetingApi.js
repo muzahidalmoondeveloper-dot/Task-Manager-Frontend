@@ -32,6 +32,26 @@ export const meetingApi = {
     return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/end`);
   },
 
+  setParticipantJoined(teamId, meetingId, userId, joined) {
+    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}/participants/${userId}`, { joined });
+  },
+  setParticipantScore(teamId, meetingId, userId, score, note) {
+    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}/participants/${userId}/score`, { score, note });
+  },
+
+  checkinNext(teamId, meetingId) {
+    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/next`);
+  },
+  checkinSkip(teamId, meetingId) {
+    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/skip`);
+  },
+  checkinSelect(teamId, meetingId, userId) {
+    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/select`, { user_id: userId });
+  },
+  checkinReset(teamId, meetingId) {
+    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/reset`);
+  },
+
   // agenda
   addAgendaItem(teamId, meetingId, payload) {
     return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/agenda`, payload);
@@ -44,6 +64,9 @@ export const meetingApi = {
   },
   reorderAgenda(teamId, meetingId, items) {
     return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/agenda/reorder`, items);
+  },
+  advanceAgenda(teamId, meetingId) {
+    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/agenda/next`);
   },
 
   // notes
