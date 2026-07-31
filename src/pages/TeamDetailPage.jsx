@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import Select from "../components/Select";
 import { useParams, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import DOMPurify from "dompurify";
@@ -8,6 +9,7 @@ import DatePicker from "../components/DatePicker";
 import CelebrationOverlay from "../components/CelebrationOverlay";
 import IconPickerButton from "../components/IconPicker.jsx";
 import { RockIconDisplay } from "../utils/rockIcons.jsx";
+import { getDueRowClassName } from "../utils/taskDueStatus";
 
 import { teamApi } from "../api/teamApi";
 import { taskApi } from "../api/taskApi";
@@ -252,13 +254,13 @@ function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, 
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
+                  <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     {!teams?.some((t) => String(t.id) === teamId) && team && (
                       <option value={team.id}>{team.name}</option>
                     )}
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -281,11 +283,11 @@ function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, 
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
+                  <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -294,11 +296,11 @@ function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, 
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
                   <div className="relative">
-                    <select value={status} onChange={(e) => setStatus(e.target.value)}
+                    <Select value={status} onChange={(e) => setStatus(e.target.value)}
                       className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none">
                       <option value="active">Active</option>
                       <option value="archived">Archived</option>
-                    </select>
+                    </Select>
                     <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
@@ -773,6 +775,12 @@ const STATUS_OPTIONS = [
   { value: "done", label: "Done" },
 ];
 
+const PRIORITY_OPTIONS = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
 function formatDate(dateString) {
   if (!dateString) return "";
   return new Date(`${dateString}T00:00:00`).toLocaleDateString();
@@ -906,11 +914,11 @@ function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
                     <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                   </svg>
                 </div>
-                <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
+                <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
                   className="absolute inset-0 w-full cursor-pointer opacity-0">
                   <option value="">Unassigned</option>
                   {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-                </select>
+                </Select>
               </div>
             </div>
 
@@ -931,12 +939,12 @@ function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
                 <div className="relative">
-                  <select value={taskStatus} onChange={(e) => setTaskStatus(e.target.value)}
+                  <Select value={taskStatus} onChange={(e) => setTaskStatus(e.target.value)}
                     className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:border-slate-400 focus:outline-none">
                     <option value="todo">Todo</option>
                     <option value="in_progress">In Progress</option>
                     <option value="done">Done</option>
-                  </select>
+                  </Select>
                   <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                   </svg>
@@ -945,12 +953,12 @@ function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Priority</label>
                 <div className="relative">
-                  <select value={priority} onChange={(e) => setPriority(e.target.value)}
+                  <Select value={priority} onChange={(e) => setPriority(e.target.value)}
                     className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:border-slate-400 focus:outline-none">
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
                     <option value="high">High</option>
-                  </select>
+                  </Select>
                   <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                   </svg>
@@ -1004,7 +1012,7 @@ export default function TeamDetailPage() {
   const [editingTodo, setEditingTodo] = useState(null);
   const [celebrationData, setCelebrationData] = useState(null);
 
-  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   const members = useMemo(() => {
     return team?.members || [];
@@ -1070,6 +1078,14 @@ export default function TeamDetailPage() {
     loadData();
   }, [teamId]);
 
+  useEffect(() => {
+    if (!canManageTasks) return;
+    userApi.list()
+      .then((u) => setTodoUsers(Array.isArray(u) ? u : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canManageTasks]);
+
   async function openTodoModal(task = null) {
     if (todoUsers.length === 0) {
       try {
@@ -1133,6 +1149,26 @@ export default function TeamDetailPage() {
       }
     } catch (err) {
       toast.error(err.message || "Unable to update task status.");
+    }
+  }
+
+  async function quickPriorityUpdate(task, priority) {
+    try {
+      const updatedTask = await taskApi.update(task.id, { priority });
+      setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
+      toast.success("Task priority updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update task priority.");
+    }
+  }
+
+  async function quickAssigneeUpdate(task, assigneeId) {
+    try {
+      const updatedTask = await taskApi.update(task.id, { assignee_id: assigneeId ? Number(assigneeId) : null });
+      setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
+      toast.success("Task assignee updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update task assignee.");
     }
   }
 
@@ -1258,6 +1294,10 @@ export default function TeamDetailPage() {
                     Project
                   </th>
 
+                  <th className="min-w-32 px-4 py-3 text-left font-semibold text-slate-700">
+                    Priority
+                  </th>
+
                   <th className="min-w-44 px-4 py-3 text-left font-semibold text-slate-700">
                     Assignee
                   </th>
@@ -1285,7 +1325,7 @@ export default function TeamDetailPage() {
               <tbody className="divide-y divide-slate-200">
                 {tasks.length ? (
                   tasks.map((task) => (
-                    <tr key={task.id} className="hover:bg-slate-50/70">
+                    <tr key={task.id} className={getDueRowClassName(task)}>
                       <td className="px-4 py-4 align-middle">
                         <button
                           type="button"
@@ -1333,8 +1373,37 @@ export default function TeamDetailPage() {
                         {task.project?.name || "—"}
                       </td>
 
+                      <td className="px-4 py-4 align-middle">
+                        {canManageTasks ? (
+                          <Select
+                            value={task.priority || "medium"}
+                            onChange={(event) => quickPriorityUpdate(task, event.target.value)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none"
+                          >
+                            {PRIORITY_OPTIONS.map((p) => (
+                              <option key={p.value} value={p.value}>{p.label}</option>
+                            ))}
+                          </Select>
+                        ) : (
+                          <span className="capitalize text-slate-700">{task.priority || "medium"}</span>
+                        )}
+                      </td>
+
                       <td className="px-4 py-4 align-middle text-slate-700">
-                        {task.assignee?.full_name || "—"}
+                        {canManageTasks ? (
+                          <Select
+                            value={task.assignee_id || ""}
+                            onChange={(event) => quickAssigneeUpdate(task, event.target.value)}
+                            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none"
+                          >
+                            <option value="">Unassigned</option>
+                            {todoUsers.map((u) => (
+                              <option key={u.id} value={u.id}>{u.full_name}</option>
+                            ))}
+                          </Select>
+                        ) : (
+                          task.assignee?.full_name || "—"
+                        )}
                       </td>
 
                       <td className="px-4 py-4 align-middle text-slate-700">
@@ -1347,7 +1416,7 @@ export default function TeamDetailPage() {
 
                       <td className="px-4 py-4 align-middle">
                         {canManageTasks ? (
-                          <select
+                          <Select
                             value={task.status}
                             onChange={(event) =>
                               quickStatusUpdate(task, event.target.value)
@@ -1359,7 +1428,7 @@ export default function TeamDetailPage() {
                                 {status.label}
                               </option>
                             ))}
-                          </select>
+                          </Select>
                         ) : (
                           <span className={getStatusBadgeClass(task.status)}>
                             {getStatusLabel(task.status)}
@@ -1397,7 +1466,7 @@ export default function TeamDetailPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={canManageTasks ? 8 : 7} className="px-4 py-16 text-center">
+                    <td colSpan={canManageTasks ? 9 : 8} className="px-4 py-16 text-center">
                       <div className="flex flex-col items-center">
                         <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                           <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import Select from "../components/Select";
 import DOMPurify from "dompurify";
 import toast from "react-hot-toast";
 import LinkedItemsHoverIcon from "../components/LinkedItemsHoverIcon";
@@ -213,10 +214,10 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
+                  <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -233,11 +234,11 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
+                  <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     <option value="">No project</option>
                     {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -262,13 +263,13 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
+                  <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => (
                       <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -284,12 +285,12 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}
+                  <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     {TIMEFRAME_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               </div>
 

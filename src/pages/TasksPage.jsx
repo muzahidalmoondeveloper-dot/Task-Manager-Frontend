@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import Select from "../components/Select";
 import toast from "react-hot-toast";
 
 import { taskApi } from "../api/taskApi";
@@ -9,6 +11,7 @@ import { useAuth } from "../context/AuthContext";
 import { useConfirm, usePrompt } from "../context/ConfirmContext";
 import CelebrationOverlay from "../components/CelebrationOverlay";
 import DatePicker from "../components/DatePicker";
+import { getDueRowClassName } from "../utils/taskDueStatus";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -41,6 +44,7 @@ const initialForm = {
   status: "todo",
   priority: "medium",
 };
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -194,12 +198,12 @@ function TaskCard({ task, canManageTasks, isTeamMember, user, onEdit, onDelete, 
         </div>
       ) : isTeamMember && task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done" ? (
         <div className="mt-3">
-          <select value={task.status} onChange={(e) => onStatusChange(task, e.target.value)}
+          <Select value={task.status} onChange={(e) => onStatusChange(task, e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
             {TEAM_MEMBER_STATUS_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
-          </select>
+          </Select>
         </div>
       ) : null}
     </div>
@@ -226,21 +230,21 @@ function FiltersBar({ filters, onChange, onReset, isActive, extraFilters = null 
         {/* Status */}
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Status</label>
-          <select value={filters.status || "all"} onChange={(e) => onChange("status", e.target.value)}
+          <Select value={filters.status || "all"} onChange={(e) => onChange("status", e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900">
             <option value="all">All statuses</option>
             {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          </Select>
         </div>
 
         {/* Priority */}
         <div>
           <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Priority</label>
-          <select value={filters.priority || "all"} onChange={(e) => onChange("priority", e.target.value)}
+          <Select value={filters.priority || "all"} onChange={(e) => onChange("priority", e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900">
             <option value="all">All priorities</option>
             {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          </Select>
         </div>
 
         {extraFilters}
@@ -281,7 +285,10 @@ function TaskTableRow({
   canManageTasks,
   isTeamMember,
   userId,
+  assignees,
   onQuickStatus,
+  onQuickPriority,
+  onQuickAssignee,
   onApprove,
   onAssignBack,
   onToggleMenu,
@@ -300,7 +307,7 @@ function TaskTableRow({
       : TEAM_MEMBER_STATUS_OPTIONS;
 
   return (
-    <tr className="hover:bg-slate-50/70">
+    <tr className={getDueRowClassName(task)}>
       {/* Check circle */}
       <td className="px-4 py-4 align-middle">
         <button
@@ -326,13 +333,32 @@ function TaskTableRow({
       </td>
 
       {/* Priority */}
-      <td className="px-4 py-4 align-middle"><PriorityBadge priority={task.priority} /></td>
+      <td className="px-4 py-4 align-middle">
+        {canManageTasks ? (
+          <Select value={task.priority || "medium"} onChange={(e) => onQuickPriority(task, e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none">
+            {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        ) : (
+          <PriorityBadge priority={task.priority} />
+        )}
+      </td>
 
       {/* Project */}
       <td className="px-4 py-4 align-middle text-slate-700">{task.project?.name || "—"}</td>
 
       {/* Assignee */}
-      <td className="px-4 py-4 align-middle text-slate-700">{task.assignee?.full_name || "—"}</td>
+      <td className="px-4 py-4 align-middle text-slate-700">
+        {canManageTasks ? (
+          <Select value={task.assignee_id || ""} onChange={(e) => onQuickAssignee(task, e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none">
+            <option value="">Unassigned</option>
+            {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+          </Select>
+        ) : (
+          task.assignee?.full_name || "—"
+        )}
+      </td>
 
       {/* Team */}
       <td className="px-4 py-4 align-middle text-slate-700">{task.team?.name || "—"}</td>
@@ -348,13 +374,13 @@ function TaskTableRow({
       {/* Status */}
       <td className="px-4 py-4 align-middle">
         {canChange ? (
-          <select
+          <Select
             value={task.status}
             onChange={(e) => onQuickStatus(task, e.target.value)}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-900 focus:outline-none"
           >
             {statusOpts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
+          </Select>
         ) : (
           <StatusBadge status={task.status} />
         )}
@@ -396,17 +422,34 @@ export default function TasksPage() {
   const confirm = useConfirm();
   const prompt = usePrompt();
 
-  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
   const isTeamMember   = user?.role === "team_member";
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   // Primary view tab
-  const [primaryTab, setPrimaryTab] = useState("my_tasks");
+  const primaryTab = searchParams.get("tab") || "my_tasks";
+  function setPrimaryTab(tabId) {
+    const next = new URLSearchParams(searchParams);
+    next.set("tab", tabId);
+    setSearchParams(next);
+  }
 
   // Secondary view (within My Tasks)
-  const [myViewMode, setMyViewMode] = useState("list");
+  const myViewMode = searchParams.get("my_view") || "list";
+  function setMyViewMode(mode) {
+    const next = new URLSearchParams(searchParams);
+    next.set("my_view", mode);
+    setSearchParams(next);
+  }
 
   // Secondary view (within All Tasks)
-  const [viewMode, setViewMode] = useState("list");
+  const viewMode = searchParams.get("all_view") || "list";
+  function setViewMode(mode) {
+    const next = new URLSearchParams(searchParams);
+    next.set("all_view", mode);
+    setSearchParams(next);
+  }
 
   // Data
   const [myTasks,  setMyTasks]  = useState([]);
@@ -658,8 +701,8 @@ export default function TasksPage() {
         name:        formData.name,
         start_date:  formData.start_date || null,
         due_date:    formData.due_date   || null,
-        // New tasks are created unassigned; they land in the team's To-Do list.
-        assignee_id: isEditing && formData.assignee_id ? Number(formData.assignee_id) : null,
+        // Leave unassigned to land the task in the team's To-Do list instead.
+        assignee_id: formData.assignee_id ? Number(formData.assignee_id) : null,
         project_id:  formData.project_id  ? Number(formData.project_id)  : null,
         team_id:     formData.team_id     ? Number(formData.team_id)     : null,
         status:      formData.status,
@@ -711,6 +754,26 @@ export default function TasksPage() {
       }
     } catch (err) {
       toast.error(err.message || "Unable to update status.");
+    }
+  }
+
+  async function quickPriorityUpdate(task, newPriority) {
+    try {
+      const updated = await taskApi.update(task.id, { priority: newPriority });
+      updateTaskInLists(updated);
+      toast.success("Priority updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update priority.");
+    }
+  }
+
+  async function quickAssigneeUpdate(task, newAssigneeId) {
+    try {
+      const updated = await taskApi.update(task.id, { assignee_id: newAssigneeId ? Number(newAssigneeId) : null });
+      updateTaskInLists(updated);
+      toast.success("Assignee updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update assignee.");
     }
   }
 
@@ -907,7 +970,7 @@ export default function TasksPage() {
                         </thead>
                         <tbody className="divide-y divide-slate-200">
                           {filteredMyTasks.length ? filteredMyTasks.map((task) => (
-                            <tr key={task.id} className="hover:bg-slate-50/70">
+                            <tr key={task.id} className={getDueRowClassName(task)}>
                               <td className="px-4 py-4 align-middle">
                                 <button type="button"
                                   disabled={task.status === "pending_review"}
@@ -926,7 +989,16 @@ export default function TasksPage() {
                                 </span>
                                 {task.review_note && <p className="mt-1 text-xs text-amber-600">Note: {task.review_note}</p>}
                               </td>
-                              <td className="px-4 py-4 align-middle"><PriorityBadge priority={task.priority} /></td>
+                              <td className="px-4 py-4 align-middle">
+                                {canManageTasks ? (
+                                  <Select value={task.priority || "medium"} onChange={(e) => quickPriorityUpdate(task, e.target.value)}
+                                    className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none">
+                                    {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                                  </Select>
+                                ) : (
+                                  <PriorityBadge priority={task.priority} />
+                                )}
+                              </td>
                               <td className="px-4 py-4 align-middle text-slate-700">{task.project?.name || "—"}</td>
                               <td className="px-4 py-4 align-middle text-slate-700">{task.team?.name || "—"}</td>
                               <td className="px-4 py-4 align-middle text-slate-700">
@@ -935,10 +1007,10 @@ export default function TasksPage() {
                               <td className="px-4 py-4 align-middle"><DueDateCell task={task} /></td>
                               <td className="px-4 py-4 align-middle">
                                 {canChangeStatus(task) ? (
-                                  <select value={task.status} onChange={(e) => quickStatusUpdate(task, e.target.value)}
+                                  <Select value={task.status} onChange={(e) => quickStatusUpdate(task, e.target.value)}
                                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-900 focus:outline-none">
                                     {getStatusOptionsForTask(task).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                                  </select>
+                                  </Select>
                                 ) : (
                                   <StatusBadge status={task.status} />
                                 )}
@@ -1032,10 +1104,10 @@ export default function TasksPage() {
                           )}
                           {canChangeStatus(task) && task.status !== "pending_review" && task.status !== "done" && (
                             <div className="mt-3">
-                              <select value={task.status} onChange={(e) => quickStatusUpdate(task, e.target.value)}
+                              <Select value={task.status} onChange={(e) => quickStatusUpdate(task, e.target.value)}
                                 className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 focus:border-slate-900 focus:outline-none">
                                 {getStatusOptionsForTask(task).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                              </select>
+                              </Select>
                             </div>
                           )}
                         </div>
@@ -1141,27 +1213,27 @@ export default function TasksPage() {
                   <>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Assignee</label>
-                      <select value={allFilters.assignee} onChange={(e) => setAllFilter("assignee", e.target.value)}
+                      <Select value={allFilters.assignee} onChange={(e) => setAllFilter("assignee", e.target.value)}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900">
                         <option value="all">All assignees</option>
                         {assigneeOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Project</label>
-                      <select value={allFilters.project} onChange={(e) => setAllFilter("project", e.target.value)}
+                      <Select value={allFilters.project} onChange={(e) => setAllFilter("project", e.target.value)}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900">
                         <option value="all">All projects</option>
                         {projectOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Team</label>
-                      <select value={allFilters.team} onChange={(e) => setAllFilter("team", e.target.value)}
+                      <Select value={allFilters.team} onChange={(e) => setAllFilter("team", e.target.value)}
                         className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900">
                         <option value="all">All teams</option>
                         {teamOptions.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div>
                       <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">Due From</label>
@@ -1219,7 +1291,10 @@ export default function TasksPage() {
                               canManageTasks={canManageTasks}
                               isTeamMember={isTeamMember}
                               userId={user?.id}
+                              assignees={assignees}
                               onQuickStatus={quickStatusUpdate}
+                              onQuickPriority={quickPriorityUpdate}
+                              onQuickAssignee={quickAssigneeUpdate}
                               onApprove={approveTask}
                               onAssignBack={assignBackTask}
                               onToggleMenu={handleMenuToggle}
@@ -1442,17 +1517,17 @@ export default function TasksPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
-                  <select name="priority" value={formData.priority} onChange={handleChange}
+                  <Select name="priority" value={formData.priority} onChange={handleChange}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                     {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
-                  <select name="status" value={formData.status} onChange={handleChange}
+                  <Select name="status" value={formData.status} onChange={handleChange}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                     {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -1467,35 +1542,45 @@ export default function TasksPage() {
                 </div>
               </div>
 
-              {/* Assignee is set later (e.g. when editing) — new tasks land
-                  unassigned in the selected team's To-Do list. */}
-              {isEditing && (
+              {/* Managers/admins can assign a task directly on creation, not
+                  just when editing — leave unassigned to land it in the
+                  team's To-Do list instead. Assigning to yourself is just
+                  picking your own name here, same as anyone else. */}
+              {canManageTasks && (
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
-                  <select name="assignee_id" value={formData.assignee_id} onChange={handleChange}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    <option value="">Select assignee</option>
-                    {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name} — {a.role}</option>)}
-                  </select>
+                  <Select
+                    name="assignee_id"
+                    value={formData.assignee_id}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Unassigned</option>
+                    {assignees.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.id === user?.id ? "Assign to me" : `${a.full_name} — ${a.role}`}
+                      </option>
+                    ))}
+                  </Select>
                 </div>
               )}
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>
-                <select name="project_id" value={formData.project_id} onChange={handleChange}
+                <Select name="project_id" value={formData.project_id} onChange={handleChange}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                   <option value="">Select project</option>
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </select>
+                </Select>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Team</label>
-                <select name="team_id" value={formData.team_id} onChange={handleChange}
+                <Select name="team_id" value={formData.team_id} onChange={handleChange}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                   <option value="">Select team</option>
                   {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </select>
+                </Select>
               </div>
 
               <div className="flex gap-3 pt-2">

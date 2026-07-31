@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 
 import { useAuth } from "../../context/AuthContext";
 import { projectApi } from "../../api/projectApi";
+import { resolveMediaUrl } from "../../api/client";
 import { teamApi } from "../../api/teamApi";
 import OrgSwitcher from "../OrgSwitcher";
 
@@ -218,10 +219,11 @@ function SectionTitle({ children, collapsed }) {
   );
 }
 
-function NavItem({ to, icon, label, collapsed, onClick }) {
+function NavItem({ to, icon, label, collapsed, onClick, end = false }) {
   return (
     <NavLink
       to={to}
+      end={end}
       onClick={onClick}
       title={collapsed ? label : undefined}
       className={({ isActive }) =>
@@ -658,23 +660,24 @@ function SidebarContent({
   const profileRef = useRef(null);
 
   const canManageProjects =
-    user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   const canViewProjects = canManageProjects || user?.role === "project_manager";
 
   const canManageUsers =
-    user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
-  const canManageTeams = user?.role === "owner" || user?.role === "admin";
+  const canManageTeams = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   const canViewTeams =
     user?.role === "owner" ||
     user?.role === "admin" ||
+    user?.is_org_admin ||
     user?.role === "team_manager" ||
-    user?.role === "project_manager" ||
     user?.role === "team_member";
 
   const isTeamMember = user?.role === "team_member";
+  const isAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -857,6 +860,16 @@ function SidebarContent({
             onClick={handleClickNav}
           />
 
+          {isAdmin && (
+            <NavItem
+              to="/issues"
+              icon={<IssuesIcon />}
+              label="Issues"
+              collapsed={collapsed}
+              onClick={handleClickNav}
+            />
+          )}
+
           {canManageUsers ? (
             <NavItem
               to="/scoreboard"
@@ -920,7 +933,7 @@ function SidebarContent({
             <>
               <SectionTitle collapsed={collapsed}>Teams</SectionTitle>
 
-              {canManageTeams ? (
+              {canManageTeams && (
                 <NavItem
                   to="/teams"
                   icon={<TeamsIcon />}
@@ -928,17 +941,6 @@ function SidebarContent({
                   collapsed={collapsed}
                   onClick={handleClickNav}
                 />
-              ) : (
-                <div
-                  className={cx(
-                    "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-700",
-                    collapsed && "justify-center"
-                  )}
-                  title="Teams"
-                >
-                  <TeamsIcon />
-                  {!collapsed ? <span>Teams</span> : null}
-                </div>
               )}
 
               <div className={cx("space-y-1", !collapsed && "")}>
@@ -970,13 +972,15 @@ function SidebarContent({
             <>
               <SectionTitle collapsed={collapsed}>Projects</SectionTitle>
 
-              <NavItem
-                to="/projects"
-                icon={<ProjectsIcon />}
-                label="Projects"
-                collapsed={collapsed}
-                onClick={handleClickNav}
-              />
+              {canManageProjects && (
+                <NavItem
+                  to="/projects"
+                  icon={<ProjectsIcon />}
+                  label="Projects"
+                  collapsed={collapsed}
+                  onClick={handleClickNav}
+                />
+              )}
 
               <div className={cx("space-y-1", !collapsed && "pl-3")}>
                 {isLoadingProjects && !collapsed ? (
@@ -995,7 +999,17 @@ function SidebarContent({
                   <NestedItem
                     key={project.id}
                     to={`/projects/${project.id}`}
-                    icon={<ProjectsIcon />}
+                    icon={
+                      project.logo_url ? (
+                        <img
+                          src={resolveMediaUrl(project.logo_url)}
+                          alt=""
+                          className="h-full w-full rounded-md object-cover"
+                        />
+                      ) : (
+                        <ProjectsIcon />
+                      )
+                    }
                     label={project.name}
                     collapsed={collapsed}
                     onClick={handleClickNav}

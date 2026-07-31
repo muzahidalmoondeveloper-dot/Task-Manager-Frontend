@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Select from "../components/Select";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -164,7 +165,7 @@ export default function TeamScoreboardTab({ team }) {
           </div>
         )}
 
-        <select
+        <Select
           value={projectId}
           onChange={(e) => setProjectId(e.target.value)}
           className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm"
@@ -173,7 +174,7 @@ export default function TeamScoreboardTab({ team }) {
           {projects.map((p) => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
-        </select>
+        </Select>
 
         <button
           type="button"

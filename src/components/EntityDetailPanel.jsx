@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import Select from "./Select";
 import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 
@@ -112,7 +113,7 @@ function MilestoneFormModal({ initial, users, onCancel, onSubmit, isSaving }) {
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Owner</label>
-              <select
+              <Select
                 value={ownerId}
                 onChange={(e) => setOwnerId(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -121,7 +122,7 @@ function MilestoneFormModal({ initial, users, onCancel, onSubmit, isSaving }) {
                 {(users || []).map((u) => (
                   <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
 
@@ -339,7 +340,7 @@ export default function EntityDetailPanel({
     }
   }
 
-  const canDelete = (note) => user?.role === "owner" || user?.role === "admin" || note.author_id === user?.id;
+  const canDelete = (note) => user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || note.author_id === user?.id;
 
   return createPortal(
     <div className="fixed inset-0 z-[200]">

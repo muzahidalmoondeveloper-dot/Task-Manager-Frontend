@@ -1,4 +1,5 @@
 import { useState } from "react";
+import Select from "../Select";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -109,7 +110,7 @@ export default function ReportModal({
           {showProjectFilter && (
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>
-              <select
+              <Select
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -118,7 +119,7 @@ export default function ReportModal({
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           )}
 

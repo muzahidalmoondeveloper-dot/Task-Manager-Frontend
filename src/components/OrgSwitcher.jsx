@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { authApi } from "../api/authApi";
+import { resolveMediaUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
 function getInitials(name) {
@@ -9,6 +10,21 @@ function getInitials(name) {
   const words = name.trim().split(/\s+/);
   if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
   return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
+
+function OrgAvatar({ org, className }) {
+  if (org?.logo_url) {
+    return (
+      <div className={`shrink-0 overflow-hidden ${className}`}>
+        <img src={resolveMediaUrl(org.logo_url)} alt="" className="h-full w-full object-cover" />
+      </div>
+    );
+  }
+  return (
+    <div className={`flex shrink-0 items-center justify-center font-bold text-white ${className}`}>
+      {getInitials(org?.name)}
+    </div>
+  );
 }
 
 function CheckIcon() {
@@ -60,17 +76,26 @@ export default function OrgSwitcher({ collapsed }) {
 
   useEffect(() => {
     let cancelled = false;
-    authApi
-      .myOrganizations()
-      .then((data) => {
-        if (cancelled) return;
-        setOrgs(data.organizations || []);
-        const cur = (data.organizations || []).find((o) => o.is_current);
-        setCurrentOrg(cur || null);
-      })
-      .catch(() => {});
+
+    function load() {
+      authApi
+        .myOrganizations()
+        .then((data) => {
+          if (cancelled) return;
+          setOrgs(data.organizations || []);
+          const cur = (data.organizations || []).find((o) => o.is_current);
+          setCurrentOrg(cur || null);
+        })
+        .catch(() => {});
+    }
+
+    load();
+    // Refetch when the org's own logo/profile changes elsewhere (e.g. the
+    // Organization settings page), since this component loads its own copy.
+    window.addEventListener("org-updated", load);
     return () => {
       cancelled = true;
+      window.removeEventListener("org-updated", load);
     };
   }, []);
 
@@ -106,7 +131,6 @@ export default function OrgSwitcher({ collapsed }) {
   if (!currentOrg && orgs.length === 0) return null;
 
   const display = currentOrg || orgs[0];
-  const initials = display ? getInitials(display.name) : "?";
 
   // Collapsed: show only initials button with right-opening dropdown
   if (collapsed) {
@@ -115,10 +139,10 @@ export default function OrgSwitcher({ collapsed }) {
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-950 text-sm font-bold text-white"
+          className="overflow-hidden rounded-xl"
           title={display?.name || "Switch organization"}
         >
-          {initials}
+          <OrgAvatar org={display} className="h-10 w-10 rounded-xl bg-slate-950 text-sm" />
         </button>
 
         {open && (
@@ -143,9 +167,7 @@ export default function OrgSwitcher({ collapsed }) {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-left hover:bg-slate-100"
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-950 text-xs font-bold text-white">
-          {initials}
-        </div>
+        <OrgAvatar org={display} className="h-8 w-8 rounded-lg bg-slate-950 text-xs" />
 
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-semibold text-slate-900">
@@ -189,9 +211,7 @@ function OrgList({ orgs, switching, onSwitch, onCreateOrg }) {
                 org.is_current ? "cursor-default" : "cursor-pointer"
               }`}
             >
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-xs font-bold text-slate-700">
-                {getInitials(org.name)}
-              </div>
+              <OrgAvatar org={org} className="h-7 w-7 rounded-lg bg-slate-200 text-xs !text-slate-700" />
 
               <div className="min-w-0 flex-1">
                 <p className="truncate font-semibold text-slate-900">

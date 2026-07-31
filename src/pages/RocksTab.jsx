@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import Select from "../components/Select";
 import { createPortal } from "react-dom";
 import DOMPurify from "dompurify";
 import RichEditor from "../components/RichEditor";
@@ -176,11 +178,11 @@ function MilestoneRow({ ms, users, onChange, onDelete, isDragOver, onDragStart, 
         }`}>
           {owner ? getInitials(owner.full_name || owner.email) : "—"}
         </div>
-        <select value={ms.owner_id || ""} onChange={(e) => onChange({ ...ms, owner_id: e.target.value ? Number(e.target.value) : null })}
+        <Select value={ms.owner_id || ""} onChange={(e) => onChange({ ...ms, owner_id: e.target.value ? Number(e.target.value) : null })}
           className="absolute inset-0 w-full opacity-0 cursor-pointer">
           <option value="">Unassigned</option>
           {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-        </select>
+        </Select>
       </div>
       <button type="button" onClick={onDelete} className="shrink-0 text-slate-400 hover:text-red-500 text-lg leading-none">×</button>
     </div>
@@ -416,10 +418,10 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={teamId} onChange={(e) => setTeamId(e.target.value)}
+                  <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -436,11 +438,11 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
+                  <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
                     className="absolute inset-0 w-full cursor-pointer opacity-0">
                     <option value="">No project</option>
                     {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -461,11 +463,11 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
+                  <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
                     className="absolute inset-0 w-full opacity-0 cursor-pointer">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -473,11 +475,11 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Objective</label>
                 <div className="relative">
-                  <select value={objectiveId} onChange={(e) => setObjectiveId(e.target.value)}
+                  <Select value={objectiveId} onChange={(e) => setObjectiveId(e.target.value)}
                     className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:outline-none">
                     <option value="">Select Objective</option>
                     {objectives.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
-                  </select>
+                  </Select>
                   <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                     <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                   </svg>
@@ -496,10 +498,10 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={status} onChange={(e) => setStatus(e.target.value)}
+                  <Select value={status} onChange={(e) => setStatus(e.target.value)}
                     className="absolute inset-0 w-full opacity-0 cursor-pointer">
                     {SELECTABLE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -837,7 +839,13 @@ export default function RocksTab({ team, canManage }) {
   const [teams, setTeams] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("active");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("rocks_status") || "active";
+  function setActiveTab(status) {
+    const next = new URLSearchParams(searchParams);
+    next.set("rocks_status", status);
+    setSearchParams(next);
+  }
   const users = team?.members || [];
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);

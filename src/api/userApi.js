@@ -20,4 +20,12 @@ export const userApi = {
   delete(id) {
     return apiClient.delete(`/users/${id}`);
   },
+
+  updateMe(payload) {
+    return apiClient.patch("/users/me", payload);
+  },
+
+  changePassword(payload) {
+    return apiClient.post("/users/me/change-password", payload);
+  },
 };

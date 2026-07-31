@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import Select from "../components/Select";
 import toast from "react-hot-toast";
 import { meetingApi } from "../api/meetingApi";
 import { useAuth } from "../context/AuthContext";
@@ -354,7 +355,7 @@ function MeetingModal({ meeting, teamMembers, onSave, onClose }) {
           <div>
             <label className="mb-1 block text-xs font-medium text-slate-500">Type</label>
             <div className="relative">
-              <select
+              <Select
                 value={meetingType}
                 onChange={(e) => setMeetingType(e.target.value)}
                 className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
@@ -362,7 +363,7 @@ function MeetingModal({ meeting, teamMembers, onSave, onClose }) {
                 {MEETING_TYPES.map((t) => (
                   <option key={t.value} value={t.value}>{t.label}</option>
                 ))}
-              </select>
+              </Select>
               <svg className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                 <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
               </svg>
@@ -960,7 +961,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
                     )}
                     {remainingCandidates.length > 0 && (
                       <div className="ml-auto flex items-center gap-1.5">
-                        <select
+                        <Select
                           value={manualSpeakerId}
                           onChange={(e) => setManualSpeakerId(e.target.value)}
                           className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-700 focus:outline-none"
@@ -969,7 +970,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
                           {remainingCandidates.map((p) => (
                             <option key={p.id} value={p.user_id}>{p.user?.full_name || p.user?.email}</option>
                           ))}
-                        </select>
+                        </Select>
                         <button type="button" onClick={selectSpeaker} disabled={!manualSpeakerId || checkinSpinning}
                           className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60">
                           Set
