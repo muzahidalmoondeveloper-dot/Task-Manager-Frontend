@@ -538,7 +538,8 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       }
                       setTeamId(e.target.value);
                     }}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </Select>
                 </div>
@@ -558,7 +559,8 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                     </svg>
                   </div>
                   <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">No project</option>
                     {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </Select>
@@ -583,7 +585,8 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                     </svg>
                   </div>
                   <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
-                    className="absolute inset-0 w-full opacity-0 cursor-pointer">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
                   </Select>
@@ -760,7 +763,8 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                     </svg>
                   </div>
                   <Select value={rockId} onChange={(e) => setRockId(e.target.value)} required
-                    className="absolute inset-0 w-full opacity-0 cursor-pointer">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Select a Rock</option>
                     {teamRocks
                       .filter((r) => !r.is_archived && r.status !== "archived")

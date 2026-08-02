@@ -10,7 +10,7 @@ function DoubleChevronIcon() {
   );
 }
 
-export default function Select({ className = "", wrapperClassName = "", ...props }) {
+export default function Select({ className = "", wrapperClassName = "", hideChevron = false, ...props }) {
   // Selects declared `w-full` need their wrapper to grow to match, since the
   // wrapper (not the native select) is what determines layout width here.
   const isFullWidth = /(^|\s)w-full(\s|$)/.test(className);
@@ -20,7 +20,7 @@ export default function Select({ className = "", wrapperClassName = "", ...props
         {...props}
         className={`appearance-none !rounded-xl !border !border-slate-200 !bg-slate-50 !pr-8 hover:!bg-slate-100 focus:!border-slate-900 focus:!bg-white focus:!outline-none ${className}`}
       />
-      <DoubleChevronIcon />
+      {!hideChevron && <DoubleChevronIcon />}
     </span>
   );
 }

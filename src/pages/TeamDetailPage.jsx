@@ -255,7 +255,8 @@ function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, 
                     </svg>
                   </div>
                   <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                  className="h-full w-full cursor-pointer opacity-0">
                     {!teams?.some((t) => String(t.id) === teamId) && team && (
                       <option value={team.id}>{team.name}</option>
                     )}
@@ -284,7 +285,8 @@ function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, 
                     </svg>
                   </div>
                   <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                  className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
                   </Select>
@@ -295,16 +297,11 @@ function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, 
               {editing && (
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
-                  <div className="relative">
-                    <Select value={status} onChange={(e) => setStatus(e.target.value)}
-                      className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none">
-                      <option value="active">Active</option>
-                      <option value="archived">Archived</option>
-                    </Select>
-                    <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
-                  </div>
+                  <Select value={status} onChange={(e) => setStatus(e.target.value)}
+                    className="w-full px-3 py-2.5 text-sm">
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </Select>
                 </div>
               )}
 
@@ -915,7 +912,8 @@ function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
                   </svg>
                 </div>
                 <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
-                  className="absolute inset-0 w-full cursor-pointer opacity-0">
+                  wrapperClassName="absolute inset-0" hideChevron
+                  className="h-full w-full cursor-pointer opacity-0">
                   <option value="">Unassigned</option>
                   {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
                 </Select>
@@ -938,31 +936,21 @@ function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
-                <div className="relative">
-                  <Select value={taskStatus} onChange={(e) => setTaskStatus(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:border-slate-400 focus:outline-none">
-                    <option value="todo">Todo</option>
-                    <option value="in_progress">In Progress</option>
-                    <option value="done">Done</option>
-                  </Select>
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                  </svg>
-                </div>
+                <Select value={taskStatus} onChange={(e) => setTaskStatus(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm text-slate-700">
+                  <option value="todo">Todo</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="done">Done</option>
+                </Select>
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Priority</label>
-                <div className="relative">
-                  <Select value={priority} onChange={(e) => setPriority(e.target.value)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 focus:border-slate-400 focus:outline-none">
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                  </Select>
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                  </svg>
-                </div>
+                <Select value={priority} onChange={(e) => setPriority(e.target.value)}
+                  className="w-full px-3 py-2.5 text-sm text-slate-700">
+                  <option value="low">Low</option>
+                  <option value="medium">Medium</option>
+                  <option value="high">High</option>
+                </Select>
               </div>
             </div>
           </div>

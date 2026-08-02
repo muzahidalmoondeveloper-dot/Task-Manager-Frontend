@@ -28,6 +28,18 @@ const TABS = [
 const LOGO_MAX_BYTES = 5 * 1024 * 1024;
 const LOGO_ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
 
+const INDUSTRY_OPTIONS = [
+  "Software & Technology",
+  "Finance & Banking",
+  "Healthcare",
+  "Education",
+  "Retail & E-commerce",
+  "Manufacturing",
+  "Marketing & Advertising",
+  "Consulting",
+  "Other",
+];
+
 function getOrgInitials(name) {
   if (!name) return "?";
   const words = name.trim().split(/\s+/);
@@ -569,23 +581,18 @@ function OrgRoleModal({ title, subtitle, onClose, roles, users, form, setForm, o
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-600">Parent Role</label>
-                <div className="relative">
-                  <Select
-                    value={form.parent_id ?? ""}
-                    onChange={(e) => setForm({ ...form, parent_id: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-slate-400 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="" disabled={rootAlreadyExists}>
-                      {rootAlreadyExists ? "None (only one top-level role allowed)" : "None (top-level role)"}
-                    </option>
-                    {parentOptions.map((r) => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </Select>
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                  </svg>
-                </div>
+                <Select
+                  value={form.parent_id ?? ""}
+                  onChange={(e) => setForm({ ...form, parent_id: e.target.value ? Number(e.target.value) : null })}
+                  className="w-full px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  <option value="" disabled={rootAlreadyExists}>
+                    {rootAlreadyExists ? "None (only one top-level role allowed)" : "None (top-level role)"}
+                  </option>
+                  {parentOptions.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </Select>
                 {rootAlreadyExists ? (
                   <p className="mt-1.5 flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700">
                     <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -1393,19 +1400,14 @@ function ObjectiveModal({ editing, form, setForm, onSave, onClose, saving, users
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Project</label>
-                <div className="relative">
-                  <Select
-                    value={form.project_id}
-                    onChange={(e) => setForm({ ...form, project_id: e.target.value })}
-                    className={`w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none ${form.project_id ? "text-slate-900" : "text-slate-400"}`}
-                  >
-                    <option value="">No project</option>
-                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </Select>
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                  </svg>
-                </div>
+                <Select
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                  className={`w-full px-3 py-2.5 text-sm ${form.project_id ? "text-slate-900" : "text-slate-400"}`}
+                >
+                  <option value="">No project</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
               </div>
 
               <div>
@@ -1427,7 +1429,8 @@ function ObjectiveModal({ editing, form, setForm, onSave, onClose, saving, users
                     </svg>
                   </div>
                   <Select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
                   </Select>
@@ -1442,15 +1445,10 @@ function ObjectiveModal({ editing, form, setForm, onSave, onClose, saving, users
               {editing && (
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
-                  <div className="relative">
-                    <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                      className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none">
-                      {OBJECTIVE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </Select>
-                    <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
-                  </div>
+                  <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+                    className="w-full px-3 py-2.5 text-sm">
+                    {OBJECTIVE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </Select>
                 </div>
               )}
 
@@ -2147,6 +2145,11 @@ export default function OrganizationPage() {
   const [org, setOrg] = useState(null);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
+  const [isEditOrgModalOpen, setIsEditOrgModalOpen] = useState(false);
+  const [orgEditForm, setOrgEditForm] = useState({ name: "", description: "", website: "", industry: "" });
+  const [isSavingOrg, setIsSavingOrg] = useState(false);
+  const [orgEditError, setOrgEditError] = useState("");
+
   const activeTab = searchParams.get("tab") || "core-values";
   const isAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
   const tabs = isAdmin ? [...TABS, { id: "billing", label: "Billing" }, { id: "scoreboard-weights", label: "Scoreboard Weights" }] : TABS;
@@ -2157,6 +2160,44 @@ export default function OrganizationPage() {
 
   function setTab(tabId) {
     setSearchParams({ tab: tabId });
+  }
+
+  function openEditOrgModal() {
+    setOrgEditForm({
+      name: org?.name || "",
+      description: org?.description || "",
+      website: org?.website || "",
+      industry: org?.industry || "",
+    });
+    setOrgEditError("");
+    setIsEditOrgModalOpen(true);
+  }
+
+  function closeEditOrgModal() {
+    setIsEditOrgModalOpen(false);
+    setOrgEditError("");
+  }
+
+  async function handleEditOrgSubmit(e) {
+    e.preventDefault();
+    try {
+      setIsSavingOrg(true);
+      setOrgEditError("");
+      const updated = await organizationApi.updateCurrent({
+        name: orgEditForm.name,
+        description: orgEditForm.description || null,
+        website: orgEditForm.website || null,
+        industry: orgEditForm.industry || null,
+      });
+      setOrg(updated);
+      window.dispatchEvent(new Event("org-updated"));
+      toast.success("Organization details updated.");
+      closeEditOrgModal();
+    } catch (err) {
+      setOrgEditError(err.message || "Unable to update organization.");
+    } finally {
+      setIsSavingOrg(false);
+    }
   }
 
   async function handleLogoFileChange(e) {
@@ -2205,7 +2246,8 @@ export default function OrganizationPage() {
   return (
     <div className="w-full">
       {/* Header */}
-      <div className="mb-6 flex items-start gap-4">
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4">
         <div className="group relative shrink-0">
           <label
             htmlFor="org-logo-input"
@@ -2262,11 +2304,22 @@ export default function OrganizationPage() {
         </div>
 
         <div>
-          <h1 className="text-3xl font-bold text-slate-900">Organization</h1>
+          <h1 className="text-3xl font-bold text-slate-900">{org?.name || "Organization"}</h1>
           <p className="mt-2 text-sm text-slate-600">
             Manage your company's values, structure, and strategic objectives.
           </p>
         </div>
+        </div>
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={openEditOrgModal}
+            className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Edit Organization
+          </button>
+        )}
       </div>
 
       {/* Tab nav */}
@@ -2295,6 +2348,96 @@ export default function OrganizationPage() {
       {activeTab === "objectives"  && <ObjectivesTab canManage={isAdmin} />}
       {activeTab === "billing" && isAdmin && <BillingTab />}
       {activeTab === "scoreboard-weights" && isAdmin && <ScoreboardWeightsTab />}
+
+      {isAdmin && isEditOrgModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Edit Organization</h2>
+                <p className="mt-1 text-sm text-slate-500">Update your organization's details.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditOrgModal}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              >
+                ✕
+              </button>
+            </div>
+
+            {orgEditError && (
+              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {orgEditError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditOrgSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Organization name</label>
+                <input
+                  value={orgEditForm.name}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, name: e.target.value }))}
+                  required
+                  minLength={2}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Website</label>
+                <input
+                  value={orgEditForm.website}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, website: e.target.value }))}
+                  placeholder="https://acme.com"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Organization type</label>
+                <Select
+                  value={orgEditForm.industry}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, industry: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Select type</option>
+                  {INDUSTRY_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea
+                  value={orgEditForm.description}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, description: e.target.value }))}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEditOrgModal}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOrg}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingOrg ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

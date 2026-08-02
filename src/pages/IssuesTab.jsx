@@ -215,7 +215,8 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                     </svg>
                   </div>
                   <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </Select>
                 </div>
@@ -235,7 +236,8 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                     </svg>
                   </div>
                   <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">No project</option>
                     {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </Select>
@@ -264,7 +266,8 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                     </svg>
                   </div>
                   <Select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => (
                       <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
@@ -286,7 +289,8 @@ function IssueModal({ team, users, teams, projects, editing, onClose, onSave, sa
                     </svg>
                   </div>
                   <Select value={timeframe} onChange={(e) => setTimeframe(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     {TIMEFRAME_OPTIONS.map((o) => (
                       <option key={o.value} value={o.value}>{o.label}</option>
                     ))}

@@ -49,6 +49,14 @@ function TasksIcon() {
   );
 }
 
+function OnboardingIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M10 2a5.5 5.5 0 00-5.5 5.5c0 4.02 4.6 8.16 5.13 8.62a.55.55 0 00.74 0c.53-.46 5.13-4.6 5.13-8.62A5.5 5.5 0 0010 2zm0 7.75a2.25 2.25 0 110-4.5 2.25 2.25 0 010 4.5z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function ScoreboardIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -678,6 +686,8 @@ function SidebarContent({
 
   const isTeamMember = user?.role === "team_member";
   const isAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
+  const isProjectManager = user?.role === "project_manager" || user?.is_project_manager;
+  const canViewOnboarding = isAdmin || isProjectManager;
 
   useEffect(() => {
     localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -868,6 +878,39 @@ function SidebarContent({
               collapsed={collapsed}
               onClick={handleClickNav}
             />
+          )}
+
+          {canViewOnboarding && (
+            <>
+              <NavItem
+                to="/onboarding"
+                end
+                icon={<OnboardingIcon />}
+                label="Client Onboarding"
+                collapsed={collapsed}
+                onClick={handleClickNav}
+              />
+              {canViewOnboarding && (
+                <div className={cx("space-y-1", !collapsed && "pl-3")}>
+                  <NestedItem
+                    to="/onboarding/invitations"
+                    icon={<OnboardingIcon />}
+                    label="Invitations"
+                    collapsed={collapsed}
+                    onClick={handleClickNav}
+                  />
+                  {isAdmin && (
+                    <NestedItem
+                      to="/onboarding/templates"
+                      icon={<OnboardingIcon />}
+                      label="Templates"
+                      collapsed={collapsed}
+                      onClick={handleClickNav}
+                    />
+                  )}
+                </div>
+              )}
+            </>
           )}
 
           {canManageUsers ? (

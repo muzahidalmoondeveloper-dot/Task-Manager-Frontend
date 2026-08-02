@@ -130,13 +130,17 @@ async function request(endpoint, options = {}, isRetry = false) {
       clearSession();
     }
 
-    // New backend format: { error: { code, message, timestamp } }
+    // New backend format: { error: { code, message, details, timestamp } }
     // Old FastAPI fallback:  { detail: "..." }
     const message =
       data?.error?.message ||
       (typeof data?.detail === "string" ? data.detail : null) ||
       "Something went wrong.";
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.code = data?.error?.code || null;
+    error.details = data?.error?.details || null;
+    throw error;
   }
 
   return data;

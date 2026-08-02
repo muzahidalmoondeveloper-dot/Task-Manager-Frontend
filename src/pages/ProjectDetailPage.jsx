@@ -9,12 +9,14 @@ import { taskApi } from "../api/taskApi";
 import { userApi } from "../api/userApi";
 import { teamApi } from "../api/teamApi";
 import { reportApi } from "../api/reportApi";
-import { projectInvitationApi } from "../api/projectInvitationApi";
+import { clientInvitationApi } from "../api/clientInvitationApi";
 import { taskRequestApi } from "../api/taskRequestApi";
 import { issueApi } from "../api/issueApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
 import DatePicker from "../components/DatePicker";
+import InviteClientModal from "../components/onboarding/InviteClientModal";
+import InvitationsTable from "../components/onboarding/InvitationsTable";
 import { getDueRowClassName } from "../utils/taskDueStatus";
 
 const TASK_REQUEST_STATUS_BADGE = {
@@ -163,8 +165,6 @@ export default function ProjectDetailPage() {
   const [clientInvitations, setClientInvitations] = useState([]);
   const [isLoadingClientInvitations, setIsLoadingClientInvitations] = useState(false);
   const [isInviteClientModalOpen, setIsInviteClientModalOpen] = useState(false);
-  const [inviteClientEmail, setInviteClientEmail] = useState("");
-  const [isInvitingClient, setIsInvitingClient] = useState(false);
 
   const [taskRequests, setTaskRequests] = useState([]);
   const [isLoadingTaskRequests, setIsLoadingTaskRequests] = useState(false);
@@ -461,7 +461,7 @@ export default function ProjectDetailPage() {
   async function loadClientInvitations() {
     try {
       setIsLoadingClientInvitations(true);
-      const data = await projectInvitationApi.list(projectId);
+      const data = await clientInvitationApi.list(projectId);
       setClientInvitations(data);
     } catch (err) {
       toast.error(err.message || "Failed to load client invitations.");
@@ -476,20 +476,37 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, canCreateTasks]);
 
-  async function handleInviteClient(event) {
-    event.preventDefault();
-    if (!inviteClientEmail.trim()) return;
+  async function handleResendClientInvitation(invitationId) {
     try {
-      setIsInvitingClient(true);
-      await projectInvitationApi.invite(projectId, inviteClientEmail.trim());
-      toast.success("Client invitation sent.");
-      setInviteClientEmail("");
-      setIsInviteClientModalOpen(false);
+      await clientInvitationApi.resend(invitationId);
+      toast.success("Invitation resent.");
       await loadClientInvitations();
     } catch (err) {
-      toast.error(err.message || "Failed to invite client.");
-    } finally {
-      setIsInvitingClient(false);
+      toast.error(err.message || "Failed to resend invitation.");
+    }
+  }
+
+  async function handleDeleteDraftInvitation(invitationId) {
+    const ok = await confirm({ message: "Delete this draft invitation?", tone: "danger", confirmLabel: "Delete" });
+    if (!ok) return;
+    try {
+      await clientInvitationApi.deleteDraft(invitationId);
+      setClientInvitations((current) => current.filter((inv) => inv.id !== invitationId));
+      toast.success("Draft deleted.");
+    } catch (err) {
+      toast.error(err.message || "Failed to delete draft.");
+    }
+  }
+
+  async function handleRemoveInvitation(invitationId) {
+    const ok = await confirm({ message: "Remove this invitation from the list?", tone: "danger", confirmLabel: "Remove" });
+    if (!ok) return;
+    try {
+      await clientInvitationApi.deleteDraft(invitationId);
+      setClientInvitations((current) => current.filter((inv) => inv.id !== invitationId));
+      toast.success("Invitation removed.");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove invitation.");
     }
   }
 
@@ -497,8 +514,8 @@ export default function ProjectDetailPage() {
     const ok = await confirm({ message: "Revoke this client invitation?", tone: "danger", confirmLabel: "Revoke" });
     if (!ok) return;
     try {
-      await projectInvitationApi.revoke(projectId, invitationId);
-      setClientInvitations((current) => current.filter((inv) => inv.id !== invitationId));
+      await clientInvitationApi.revoke(invitationId);
+      await loadClientInvitations();
       toast.success("Invitation revoked.");
     } catch (err) {
       toast.error(err.message || "Failed to revoke invitation.");
@@ -1530,34 +1547,24 @@ export default function ProjectDetailPage() {
               </div>
             ) : null}
 
-            {/* ── Pending client invitations (staff only) ── */}
+            {/* ── Client invitations (staff only) ── */}
             {canCreateTasks ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-base font-semibold text-slate-900">Client Invitations</h2>
                 <p className="mt-1 text-sm text-slate-500">
                   Invited clients can view this project's status and submit task requests once they accept.
                 </p>
-
-                {isLoadingClientInvitations ? (
-                  <p className="mt-4 text-sm text-slate-500">Loading...</p>
-                ) : clientInvitations.length === 0 ? (
-                  <p className="mt-4 text-sm text-slate-400">No pending client invitations.</p>
-                ) : (
-                  <ul className="mt-4 divide-y divide-slate-100">
-                    {clientInvitations.map((inv) => (
-                      <li key={inv.id} className="flex items-center justify-between py-2.5">
-                        <span className="text-sm text-slate-700">{inv.email}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRevokeClientInvitation(inv.id)}
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                        >
-                          Revoke
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="mt-4">
+                  <InvitationsTable
+                    invitations={clientInvitations}
+                    isLoading={isLoadingClientInvitations}
+                    showProject={false}
+                    onResend={handleResendClientInvitation}
+                    onRevoke={handleRevokeClientInvitation}
+                    onDeleteDraft={handleDeleteDraftInvitation}
+                    onRemove={handleRemoveInvitation}
+                  />
+                </div>
               </div>
             ) : null}
 
@@ -2388,59 +2395,13 @@ export default function ProjectDetailPage() {
         </div>
       ) : null}
 
-      {isInviteClientModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-900">Invite Client</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  They'll get an email to set up an account and view{" "}
-                  <span className="font-medium text-slate-700">{project.name}</span>'s progress.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsInviteClientModalOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleInviteClient} className="space-y-5">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Client email</label>
-                <input
-                  type="email"
-                  value={inviteClientEmail}
-                  onChange={(event) => setInviteClientEmail(event.target.value)}
-                  required
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="client@example.com"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsInviteClientModalOpen(false)}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isInvitingClient}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {isInvitingClient ? "Sending..." : "Send Invitation"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+      <InviteClientModal
+        isOpen={isInviteClientModalOpen}
+        onClose={() => setIsInviteClientModalOpen(false)}
+        onInvited={loadClientInvitations}
+        lockedProjectId={projectId}
+        defaultProjectManagerId={pmAssignments[0]?.user_id || null}
+      />
 
       {convertingRequest ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">

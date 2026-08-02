@@ -5,6 +5,21 @@ import toast from "react-hot-toast";
 import { projectApi } from "../api/projectApi";
 import { reportApi } from "../api/reportApi";
 import { taskRequestApi } from "../api/taskRequestApi";
+import { onboardingApi } from "../api/onboardingApi";
+import { ChangeRequestNotice, DocumentStepPanel, FormStepPanel } from "../components/onboarding/ClientStepPanel";
+
+const FORM_STEP_TYPES = new Set(["information_form", "questionnaire"]);
+
+const STEP_STATUS_CFG = {
+  not_started:       { label: "Not started",       badge: "bg-slate-100 text-slate-600" },
+  in_progress:       { label: "In progress",       badge: "bg-blue-100 text-blue-700" },
+  submitted:         { label: "Submitted",         badge: "bg-amber-100 text-amber-700" },
+  under_review:      { label: "Under review",      badge: "bg-amber-100 text-amber-700" },
+  changes_requested: { label: "Changes requested", badge: "bg-orange-100 text-orange-700" },
+  approved:          { label: "Approved",          badge: "bg-emerald-100 text-emerald-700" },
+  completed:         { label: "Completed",         badge: "bg-emerald-100 text-emerald-700" },
+  skipped:           { label: "Skipped",           badge: "bg-slate-100 text-slate-500" },
+};
 
 const STATUS_DOT = {
   active: "bg-emerald-500",
@@ -103,6 +118,11 @@ export default function ClientProjectViewPage() {
 
   const [taskRequests, setTaskRequests] = useState([]);
   const [isLoadingRequests, setIsLoadingRequests] = useState(true);
+
+  const [onboarding, setOnboarding] = useState(null);
+  const [isLoadingOnboarding, setIsLoadingOnboarding] = useState(true);
+  const [savingStepId, setSavingStepId] = useState(null);
+  const [expandedStepId, setExpandedStepId] = useState(null);
 
   const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
   const [requestForm, setRequestForm] = useState({ title: "", description: "" });
@@ -213,6 +233,73 @@ export default function ClientProjectViewPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  useEffect(() => {
+    if (!projectId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setIsLoadingOnboarding(true);
+        const records = await onboardingApi.list();
+        if (cancelled) return;
+        const match = (records || []).find((r) => String(r.project?.id) === String(projectId));
+        if (match) {
+          const full = await onboardingApi.get(match.id);
+          if (!cancelled) setOnboarding(full);
+        } else if (!cancelled) {
+          setOnboarding(null);
+        }
+      } catch {
+        if (!cancelled) setOnboarding(null);
+      } finally {
+        if (!cancelled) setIsLoadingOnboarding(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
+
+  async function refreshOnboarding() {
+    // Re-fetch rather than patch client-side — progress_percentage and the
+    // onboarding's own status are derived together server-side, so only a
+    // fresh fetch is guaranteed to reflect both consistently.
+    const fresh = await onboardingApi.get(onboarding.id);
+    setOnboarding(fresh);
+  }
+
+  function handleStepUpdated(_updatedStep, fullOnboarding) {
+    if (fullOnboarding) {
+      setOnboarding(fullOnboarding);
+    } else {
+      refreshOnboarding();
+    }
+  }
+
+  async function handleStart(step) {
+    setSavingStepId(step.id);
+    try {
+      await onboardingApi.updateStep(onboarding.id, step.id, { status: "in_progress" });
+      await refreshOnboarding();
+    } catch (err) {
+      toast.error(err.message || "Unable to update this step.");
+    } finally {
+      setSavingStepId(null);
+    }
+  }
+
+  async function handleSimpleSubmit(step) {
+    setSavingStepId(step.id);
+    try {
+      await onboardingApi.submitStep(onboarding.id, step.id);
+      await refreshOnboarding();
+      toast.success("Submitted for review.");
+    } catch (err) {
+      toast.error(err.message || "Unable to submit this step.");
+    } finally {
+      setSavingStepId(null);
+    }
+  }
+
   const requestCounts = useMemo(() => {
     return taskRequests.reduce(
       (acc, r) => ({ ...acc, [r.status]: (acc[r.status] || 0) + 1 }),
@@ -293,6 +380,82 @@ export default function ClientProjectViewPage() {
           </p>
         </div>
       </div>
+
+      {/* ── Onboarding ── */}
+      {isLoadingOnboarding ? null : onboarding ? (
+        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm sm:p-7">
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-base font-semibold text-slate-900">Onboarding Checklist</h2>
+              <p className="mt-0.5 text-xs text-slate-500">Complete the steps below to get your project started.</p>
+            </div>
+            <span className="text-sm font-semibold text-slate-700">{onboarding.progress_percentage}% complete</span>
+          </div>
+
+          <div className="mb-5 h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-slate-900 transition-all" style={{ width: `${onboarding.progress_percentage}%` }} />
+          </div>
+
+          <ul className="space-y-2.5">
+            {onboarding.steps.map((step) => {
+              const cfg = STEP_STATUS_CFG[step.status] || STEP_STATUS_CFG.not_started;
+              const isSaving = savingStepId === step.id;
+              const isFormStep = FORM_STEP_TYPES.has(step.step_type);
+              const isDocStep = step.step_type === "document_upload";
+              const isExpanded = expandedStepId === step.id;
+              return (
+                <li key={step.id} className="rounded-xl border border-slate-200 p-3.5">
+                  <div className="flex items-center gap-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="flex items-center gap-2 text-sm font-medium text-slate-900">
+                        {step.title}
+                        {step.is_required && <span className="text-[10px] font-semibold uppercase text-slate-400">Required</span>}
+                      </p>
+                      {step.description && <p className="mt-0.5 text-xs text-slate-500">{step.description}</p>}
+                    </div>
+                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${cfg.badge}`}>{cfg.label}</span>
+                    {(isFormStep || isDocStep) ? (
+                      <button type="button" onClick={() => setExpandedStepId(isExpanded ? null : step.id)}
+                        className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                        {isExpanded ? "Hide" : "Open"}
+                      </button>
+                    ) : (
+                      <>
+                        {step.status === "not_started" && (
+                          <button type="button" disabled={isSaving} onClick={() => handleStart(step)}
+                            className="shrink-0 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+                            Start
+                          </button>
+                        )}
+                        {(step.status === "in_progress" || step.status === "changes_requested") && (
+                          <button type="button" disabled={isSaving} onClick={() => handleSimpleSubmit(step)}
+                            className="shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                            Submit
+                          </button>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {step.review_comment && (
+                    <p className="mt-2.5 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                      <span className="font-semibold">Reviewer note:</span> {step.review_comment}
+                    </p>
+                  )}
+                  <ChangeRequestNotice step={step} />
+
+                  {isExpanded && isFormStep && (
+                    <FormStepPanel step={step} onboardingId={onboarding.id} onStepUpdated={handleStepUpdated} />
+                  )}
+                  {isExpanded && isDocStep && (
+                    <DocumentStepPanel step={step} onboardingId={onboarding.id} onStepUpdated={handleStepUpdated} />
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       {/* ── Report ── */}
       <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
