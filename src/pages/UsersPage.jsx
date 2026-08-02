@@ -146,7 +146,10 @@ export default function UsersPage() {
       setIsLoading(true);
       setError("");
       const [userData, teamData] = await Promise.all([userApi.list(), teamApi.list()]);
-      setUsers(userData);
+      // This page manages staff (owner/admin/team_manager/project_manager/
+      // team_member) — clients are invited and managed from Client
+      // Onboarding instead, and never have a scoreboard.
+      setUsers((userData || []).filter((u) => u.role !== "client"));
       setTeams(teamData);
     } catch (err) {
       setError(err.message || "Unable to load users.");
