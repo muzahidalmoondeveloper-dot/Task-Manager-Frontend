@@ -146,16 +146,6 @@ export default function ReportEditPage() {
     }
   }
 
-  async function handleToggleTeamVisible(event) {
-    const team_visible = event.target.checked;
-    try {
-      const updated = await reportApi.update(reportId, { team_visible });
-      setReport(updated);
-    } catch (err) {
-      toast.error(err.message || "Failed to update visibility.");
-    }
-  }
-
   async function handleDownload() {
     try {
       const blob = await reportApi.fetchPdfBlob(reportId, { download: true });
@@ -278,29 +268,16 @@ export default function ReportEditPage() {
             </div>
           ))}
 
-          {canManage ? (
+          {canManage && !isLocked ? (
             <div className="col-span-full flex flex-wrap items-center gap-4">
-              {!isLocked ? (
-                <button
-                  type="button"
-                  onClick={handleRegenerate}
-                  disabled={isRegenerating}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
-                >
-                  {isRegenerating ? "Refreshing..." : "Regenerate data from project"}
-                </button>
-              ) : null}
-
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={report.team_visible}
-                  disabled={isLocked}
-                  onChange={handleToggleTeamVisible}
-                  className="h-4 w-4 rounded border-slate-300 disabled:opacity-60"
-                />
-                Team members can view and download this report
-              </label>
+              <button
+                type="button"
+                onClick={handleRegenerate}
+                disabled={isRegenerating}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                {isRegenerating ? "Refreshing..." : "Regenerate data from project"}
+              </button>
             </div>
           ) : null}
         </div>

@@ -3,10 +3,13 @@ import { useNavigate, useParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { reportApi } from "../api/reportApi";
+import { useAuth } from "../context/AuthContext";
 
 export default function ReportPreviewPage() {
   const { reportId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const canDownload = user?.role !== "team_member" || user?.is_org_admin || user?.is_team_manager || user?.is_project_manager;
 
   const [objectUrl, setObjectUrl] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -66,14 +69,16 @@ export default function ReportPreviewPage() {
           ← Back to Edit
         </button>
 
-        <button
-          type="button"
-          onClick={handleDownload}
-          disabled={!objectUrl}
-          className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-        >
-          Download PDF
-        </button>
+        {canDownload && (
+          <button
+            type="button"
+            onClick={handleDownload}
+            disabled={!objectUrl}
+            className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+          >
+            Download PDF
+          </button>
+        )}
       </div>
 
       <div className="flex-1">
