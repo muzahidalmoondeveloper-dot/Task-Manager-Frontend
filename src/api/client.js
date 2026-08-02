@@ -1,5 +1,19 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
+// Uploaded/static files (e.g. project logos) are served from the backend's
+// `/media` path, which sits outside the `/api` prefix. When the frontend and
+// backend share an origin (the default), a plain relative path just works;
+// when `VITE_API_BASE_URL` points at a separately-hosted backend, derive
+// that backend's origin so media URLs resolve correctly instead of against
+// the frontend's own origin.
+export function resolveMediaUrl(path) {
+  if (!path) return null;
+  if (/^https?:\/\//i.test(API_BASE_URL)) {
+    return `${new URL(API_BASE_URL).origin}${path}`;
+  }
+  return path;
+}
+
 export function getAccessToken() {
   return localStorage.getItem("access_token");
 }
@@ -78,10 +92,11 @@ function clearSession() {
 async function request(endpoint, options = {}, isRetry = false) {
   const token = getAccessToken();
 
-  const headers = {
-    "Content-Type": "application/json",
-    ...(options.headers || {}),
-  };
+  // Uploads pass a FormData body and must NOT set Content-Type themselves —
+  // the browser sets it (including the multipart boundary) automatically.
+  const headers = options.body instanceof FormData
+    ? { ...(options.headers || {}) }
+    : { "Content-Type": "application/json", ...(options.headers || {}) };
 
   if (token) {
     headers.Authorization = `Bearer ${token}`;
@@ -115,13 +130,17 @@ async function request(endpoint, options = {}, isRetry = false) {
       clearSession();
     }
 
-    // New backend format: { error: { code, message, timestamp } }
+    // New backend format: { error: { code, message, details, timestamp } }
     // Old FastAPI fallback:  { detail: "..." }
     const message =
       data?.error?.message ||
       (typeof data?.detail === "string" ? data.detail : null) ||
       "Something went wrong.";
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.code = data?.error?.code || null;
+    error.details = data?.error?.details || null;
+    throw error;
   }
 
   return data;
@@ -158,6 +177,13 @@ export const apiClient = {
   delete(endpoint) {
     return request(endpoint, {
       method: "DELETE",
+    });
+  },
+
+  upload(endpoint, formData, method = "POST") {
+    return request(endpoint, {
+      method,
+      body: formData,
     });
   },
 };

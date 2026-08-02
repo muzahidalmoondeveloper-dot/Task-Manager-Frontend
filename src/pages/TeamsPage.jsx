@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Select from "../components/Select";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
@@ -54,7 +55,7 @@ export default function TeamsPage() {
   const isEditing = editingTeamId !== null;
 
   const teamManagers = useMemo(() => {
-    return users.filter((user) => user.role === "team_manager");
+    return users.filter((user) => user.role === "team_manager" || user.is_team_manager);
   }, [users]);
 
   const teamMembers = useMemo(() => {
@@ -313,7 +314,7 @@ export default function TeamsPage() {
               Manager
             </label>
 
-            <select
+            <Select
               value={managerFilter}
               onChange={(event) => setManagerFilter(event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -325,7 +326,7 @@ export default function TeamsPage() {
                   {manager.full_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div>
@@ -333,7 +334,7 @@ export default function TeamsPage() {
               Member
             </label>
 
-            <select
+            <Select
               value={memberFilter}
               onChange={(event) => setMemberFilter(event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -345,7 +346,7 @@ export default function TeamsPage() {
                   {member.full_name}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div className="flex items-end">
@@ -623,7 +624,7 @@ export default function TeamsPage() {
                   Team Manager
                 </label>
 
-                <select
+                <Select
                   name="team_manager_id"
                   value={formData.team_manager_id}
                   onChange={handleChange}
@@ -637,7 +638,7 @@ export default function TeamsPage() {
                       {manager.full_name}
                     </option>
                   ))}
-                </select>
+                </Select>
 
                 {!teamManagers.length ? (
                   <p className="mt-1 text-xs text-red-500">

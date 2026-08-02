@@ -1,6 +1,22 @@
 import { apiClient } from "./client";
 
 export const organizationApi = {
+  // Current organization profile
+  getCurrent() {
+    return apiClient.get("/organizations/current");
+  },
+  updateCurrent(payload) {
+    return apiClient.put("/organizations/current", payload);
+  },
+  uploadLogo(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return apiClient.upload("/organizations/current/logo", formData, "POST");
+  },
+  deleteLogo() {
+    return apiClient.delete("/organizations/current/logo");
+  },
+
   // Core Values
   listValues() {
     return apiClient.get("/organization/values");

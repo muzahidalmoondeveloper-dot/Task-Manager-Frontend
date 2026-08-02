@@ -1,4 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
+import Select from "../components/Select";
 import { createPortal } from "react-dom";
 import DOMPurify from "dompurify";
 import RichEditor from "../components/RichEditor";
@@ -528,7 +530,7 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={teamId}
+                  <Select value={teamId}
                     onChange={(e) => {
                       if (e.target.value !== teamId) {
                         setRockId("");      // rocks are team-scoped
@@ -536,9 +538,10 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       }
                       setTeamId(e.target.value);
                     }}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -555,11 +558,12 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={projectId} onChange={(e) => setProjectId(e.target.value)}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                  <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">No project</option>
                     {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -580,11 +584,12 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
-                    className="absolute inset-0 w-full opacity-0 cursor-pointer">
+                  <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -668,25 +673,25 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
               {/* Interpolation */}
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Interpolation</label>
-                <select value={interpolation} onChange={(e) => setInterpolation(e.target.value)}
+                <Select value={interpolation} onChange={(e) => setInterpolation(e.target.value)}
                   className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400">
                   {INTERPOLATION_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                </Select>
               </div>
 
               {/* Target type */}
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Target type</label>
-                <select value={targetType} onChange={(e) => setTargetType(e.target.value)}
+                <Select value={targetType} onChange={(e) => setTargetType(e.target.value)}
                   className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400">
                   {TARGET_TYPE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                </Select>
               </div>
 
               {/* Formula */}
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Formula</label>
-                <select value={formula} onChange={(e) => setFormula(e.target.value)}
+                <Select value={formula} onChange={(e) => setFormula(e.target.value)}
                   className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400">
                   {(targetType === "boolean"
                     ? FORMULA_OPTIONS.filter((o) => o.value === "" || o.value === "equals")
@@ -694,7 +699,7 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       ? FORMULA_OPTIONS.filter((o) => o.value !== "between")
                       : FORMULA_OPTIONS
                   ).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </select>
+                </Select>
                 {targetType === "direction" && (
                   <p className="mt-1 text-[11px] text-slate-400">
                     Direction compares each value to the previous one: &gt;= means it should rise or hold, &lt;= means it should fall or hold.
@@ -709,12 +714,12 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                     {formula === "between" ? "Reference range" : "Reference value"}
                   </label>
                   {targetType === "boolean" ? (
-                    <select value={referenceValue} onChange={(e) => setReferenceValue(e.target.value)}
+                    <Select value={referenceValue} onChange={(e) => setReferenceValue(e.target.value)}
                       className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400">
                       <option value="">Select target</option>
                       <option value="1">Yes</option>
                       <option value="0">No</option>
-                    </select>
+                    </Select>
                   ) : formula === "between" ? (
                     <div className="flex items-center gap-2">
                       <input type="number" step="any" value={referenceValue}
@@ -757,8 +762,9 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={rockId} onChange={(e) => setRockId(e.target.value)} required
-                    className="absolute inset-0 w-full opacity-0 cursor-pointer">
+                  <Select value={rockId} onChange={(e) => setRockId(e.target.value)} required
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Select a Rock</option>
                     {teamRocks
                       .filter((r) => !r.is_archived && r.status !== "archived")
@@ -767,7 +773,7 @@ function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, ed
                     {editing?.rock && teamRocks.some((r) => r.id === editing.rock.id && (r.is_archived || r.status === "archived")) && (
                       <option value={editing.rock.id}>{editing.rock.title} (archived)</option>
                     )}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -902,10 +908,10 @@ function KPIGroupModal({ group, onClose, onSave, saving }) {
           </div>
           <div>
             <label className="mb-1.5 block text-xs font-semibold text-slate-500">Group formula</label>
-            <select value={formula} onChange={(e) => setFormula(e.target.value)}
+            <Select value={formula} onChange={(e) => setFormula(e.target.value)}
               className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-700 outline-none focus:border-slate-400">
               {GROUP_FORMULA_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </select>
+            </Select>
             <p className="mt-1 text-[11px] text-slate-400">Controls the aggregate shown on the group's header row.</p>
           </div>
           <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
@@ -1582,7 +1588,13 @@ export default function KPIsTab({ team, canManage }) {
   const [teams, setTeams] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("weekly");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = searchParams.get("kpi_view") || "weekly";
+  function setView(value) {
+    const next = new URLSearchParams(searchParams);
+    next.set("kpi_view", value);
+    setSearchParams(next);
+  }
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);

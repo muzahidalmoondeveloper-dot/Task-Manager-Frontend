@@ -25,6 +25,16 @@ export const projectApi = {
     return apiClient.delete(`/projects/${id}`);
   },
 
+  uploadLogo(id, file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return apiClient.upload(`/projects/${id}/logo`, formData, "POST");
+  },
+
+  deleteLogo(id) {
+    return apiClient.delete(`/projects/${id}/logo`);
+  },
+
   listMembers(id) {
     return apiClient.get(`/projects/${id}/members`);
   },

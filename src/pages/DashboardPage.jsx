@@ -2,18 +2,34 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
-import { taskApi } from "../api/taskApi";
-import { userApi } from "../api/userApi";
-import { teamApi } from "../api/teamApi";
-import { projectApi } from "../api/projectApi";
+import { dashboardApi } from "../api/dashboardApi";
 import { integrationApi } from "../api/integrationApi";
 
 const initialStats = {
+  roleView: null,
   tasks: [],
-  users: [],
   teams: [],
   projects: [],
+  orgTotals: null,
   integrations: [],
+};
+
+const ROLE_VIEW_COPY = {
+  admin: {
+    heading: "Here's your organization overview.",
+    teamsTitle: "Teams",
+    projectsTitle: "Latest Projects",
+  },
+  manager: {
+    heading: "Here's an overview of your teams and projects.",
+    teamsTitle: "My Teams",
+    projectsTitle: "My Projects",
+  },
+  team_member: {
+    heading: "Here's an overview of your tasks.",
+    teamsTitle: "My Teams",
+    projectsTitle: "My Projects",
+  },
 };
 
 function StatCard({ title, value, description, icon, tone = "slate" }) {
@@ -532,10 +548,13 @@ function PieChart({ segments }) {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const isTeamMember = user?.role === "team_member";
 
   const [stats, setStats] = useState(initialStats);
   const [isLoading, setIsLoading] = useState(true);
+
+  const isTeamMember = stats.roleView === "team_member";
+  const isAdminView = stats.roleView === "admin";
+  const copy = ROLE_VIEW_COPY[stats.roleView] || ROLE_VIEW_COPY.team_member;
 
   const taskSummary = useMemo(() => {
     const total = stats.tasks.length;
@@ -606,52 +625,25 @@ export default function DashboardPage() {
   async function loadDashboardData() {
     try {
       setIsLoading(true);
+      const summary = await dashboardApi.getSummary();
 
-      if (isTeamMember) {
-        const taskData = await taskApi.listMy();
-        setStats({ ...initialStats, tasks: Array.isArray(taskData) ? taskData : [] });
-        return;
+      let integrations = [];
+      if (summary.role_view === "admin") {
+        try {
+          const integrationData = await integrationApi.accounts();
+          integrations = Array.isArray(integrationData) ? integrationData : [];
+        } catch {
+          integrations = [];
+        }
       }
 
-      const results = await Promise.allSettled([
-        taskApi.list(),
-        userApi.list(),
-        teamApi.list(),
-        projectApi.list(),
-        integrationApi.accounts(),
-      ]);
-
-      const [
-        tasksResult,
-        usersResult,
-        teamsResult,
-        projectsResult,
-        integrationsResult,
-      ] = results;
-
       setStats({
-        tasks:
-          tasksResult.status === "fulfilled" && Array.isArray(tasksResult.value)
-            ? tasksResult.value
-            : [],
-        users:
-          usersResult.status === "fulfilled" && Array.isArray(usersResult.value)
-            ? usersResult.value
-            : [],
-        teams:
-          teamsResult.status === "fulfilled" && Array.isArray(teamsResult.value)
-            ? teamsResult.value
-            : [],
-        projects:
-          projectsResult.status === "fulfilled" &&
-          Array.isArray(projectsResult.value)
-            ? projectsResult.value
-            : [],
-        integrations:
-          integrationsResult.status === "fulfilled" &&
-          Array.isArray(integrationsResult.value)
-            ? integrationsResult.value
-            : [],
+        roleView: summary.role_view,
+        tasks: Array.isArray(summary.tasks) ? summary.tasks : [],
+        teams: Array.isArray(summary.teams) ? summary.teams : [],
+        projects: Array.isArray(summary.projects) ? summary.projects : [],
+        orgTotals: summary.org_totals || null,
+        integrations,
       });
     } catch (err) {
       toast.error(err.message || "Unable to load dashboard data.");
@@ -662,7 +654,8 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadDashboardData();
-  }, [isTeamMember]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="w-full">
@@ -670,7 +663,7 @@ export default function DashboardPage() {
         <div>
           <h1 className="text-3xl font-bold text-slate-900">Dashboard</h1>
           <p className="mt-2 text-sm text-slate-600">
-            Welcome back, {user?.full_name}. Here is your workspace overview.
+            Welcome back, {user?.full_name}. {copy.heading}
           </p>
         </div>
 
@@ -689,11 +682,15 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          <div className={`grid gap-4 sm:grid-cols-2 ${isTeamMember ? "xl:grid-cols-3" : "xl:grid-cols-5"}`}>
+          <div className={`grid gap-4 sm:grid-cols-2 ${isAdminView ? "xl:grid-cols-5" : isTeamMember ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
             <StatCard
               title="My Tasks"
               value={taskSummary.total}
-              description={isTeamMember ? "Tasks assigned to you" : "All assigned and created tasks"}
+              description={
+                isTeamMember ? "Tasks assigned to you"
+                : isAdminView ? "All tasks across the organization"
+                : "Tasks across your teams and projects"
+              }
               icon={<TasksIcon />}
               tone="indigo"
             />
@@ -714,11 +711,11 @@ export default function DashboardPage() {
               tone="green"
             />
 
-            {!isTeamMember ? (
+            {isAdminView && (
               <>
                 <StatCard
                   title="Users"
-                  value={stats.users.length}
+                  value={stats.orgTotals?.users ?? 0}
                   description="Admins, managers, and members"
                   icon={<UsersIcon />}
                   tone="blue"
@@ -726,13 +723,33 @@ export default function DashboardPage() {
 
                 <StatCard
                   title="Teams"
-                  value={stats.teams.length}
+                  value={stats.orgTotals?.teams ?? 0}
                   description="Active workspace teams"
                   icon={<TeamsIcon />}
                   tone="purple"
                 />
               </>
-            ) : null}
+            )}
+
+            {!isAdminView && !isTeamMember && stats.teams.length > 0 && (
+              <StatCard
+                title="My Teams"
+                value={stats.teams.length}
+                description="Teams you manage"
+                icon={<TeamsIcon />}
+                tone="purple"
+              />
+            )}
+
+            {!isAdminView && !isTeamMember && stats.projects.length > 0 && (
+              <StatCard
+                title="My Projects"
+                value={stats.projects.length}
+                description="Projects you're assigned to"
+                icon={<ProjectsIcon />}
+                tone="teal"
+              />
+            )}
           </div>
 
           <div className="mt-6 grid gap-6 lg:grid-cols-3">
@@ -854,11 +871,11 @@ export default function DashboardPage() {
             </section>
           </div>
 
-          {!isTeamMember ? (
+          {isAdminView && (
             <div className="mt-6 grid gap-6 lg:grid-cols-2">
               <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-lg font-bold text-slate-900">
-                  Latest Projects
+                  {copy.projectsTitle}
                 </h2>
 
                 <div className="mt-5 space-y-3">
@@ -937,7 +954,43 @@ export default function DashboardPage() {
                 </div>
               </section>
             </div>
-          ) : null}
+          )}
+
+          {!isAdminView && !isTeamMember && (stats.teams.length > 0 || stats.projects.length > 0) && (
+            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+              {stats.teams.length > 0 && (
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="text-lg font-bold text-slate-900">{copy.teamsTitle}</h2>
+                  <div className="mt-5 space-y-3">
+                    {stats.teams.map((team) => (
+                      <div key={team.id} className="rounded-xl border border-slate-200 px-4 py-3">
+                        <p className="text-sm font-semibold text-slate-900">{team.name}</p>
+                        {team.description ? (
+                          <p className="mt-1 text-xs text-slate-500">{team.description}</p>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              {stats.projects.length > 0 && (
+                <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+                  <h2 className="text-lg font-bold text-slate-900">{copy.projectsTitle}</h2>
+                  <div className="mt-5 space-y-3">
+                    {stats.projects.map((project) => (
+                      <div key={project.id} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-3">
+                        <p className="text-sm font-semibold text-slate-900">{project.name}</p>
+                        <span className="rounded-full bg-teal-100 px-2.5 py-1 text-xs font-semibold capitalize text-teal-700">
+                          {project.status || "Active"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          )}
         </>
       )}
     </div>

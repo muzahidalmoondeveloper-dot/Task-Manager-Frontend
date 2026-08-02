@@ -21,8 +21,9 @@ const ROLE_LABELS = {
   client: "Client",
 };
 
-function redirectPathForRole(role) {
-  return role === "client" ? "/client" : "/dashboard";
+function redirectPathForRole(role, projectId) {
+  if (role !== "client") return "/dashboard";
+  return projectId ? `/client/projects/${projectId}` : "/client";
 }
 
 export default function AcceptInvitationPage() {
@@ -42,6 +43,7 @@ export default function AcceptInvitationPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordFocused, setPasswordFocused] = useState(false);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   useEffect(() => {
     if (!token) {
@@ -62,7 +64,7 @@ export default function AcceptInvitationPage() {
       const response = await invitationApi.accept(token);
       loginWithToken(response.access_token, response.user, null, response.refresh_token);
       toast.success(`You've joined ${preview?.organization_name || "the organization"}!`);
-      navigate(redirectPathForRole(response.user?.role), { replace: true });
+      navigate(redirectPathForRole(response.user?.role, preview?.project_id), { replace: true });
     } catch (err) {
       toast.error(err.message || "Failed to accept invitation.");
       setAccepting(false);
@@ -92,7 +94,7 @@ export default function AcceptInvitationPage() {
       });
       loginWithToken(response.access_token, response.user, null, response.refresh_token);
       toast.success(`You've joined ${preview?.organization_name || "the organization"}!`);
-      navigate(redirectPathForRole(response.user?.role), { replace: true });
+      navigate(redirectPathForRole(response.user?.role, preview?.project_id), { replace: true });
     } catch (err) {
       setSetupError(err.message || "Failed to set up your account.");
     } finally {
@@ -164,13 +166,35 @@ export default function AcceptInvitationPage() {
               <span className="font-medium text-slate-900">{preview.project_name}</span>
             </div>
           ) : null}
+          {preview?.project_manager_name ? (
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-500">Project Manager</span>
+              <span className="font-medium text-slate-900">{preview.project_manager_name}</span>
+            </div>
+          ) : null}
+          {preview?.onboarding_template_name ? (
+            <div className="flex justify-between text-sm">
+              <span className="text-slate-500">Onboarding checklist</span>
+              <span className="font-medium text-slate-900">{preview.onboarding_template_name}</span>
+            </div>
+          ) : null}
         </div>
+
+        <label className="mb-5 flex items-start gap-2 text-xs text-slate-600">
+          <input
+            type="checkbox"
+            checked={termsAccepted}
+            onChange={(e) => setTermsAccepted(e.target.checked)}
+            className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300"
+          />
+          I agree to the Terms of Service and Privacy Policy.
+        </label>
 
         {isAuthenticated ? (
           <button
             type="button"
             onClick={handleAccept}
-            disabled={accepting}
+            disabled={accepting || !termsAccepted}
             className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {accepting ? "Accepting..." : "Accept Invitation"}
@@ -277,7 +301,7 @@ export default function AcceptInvitationPage() {
 
             <button
               type="submit"
-              disabled={isSettingUp}
+              disabled={isSettingUp || !termsAccepted}
               className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {isSettingUp ? "Setting up..." : "Create Account & Accept"}

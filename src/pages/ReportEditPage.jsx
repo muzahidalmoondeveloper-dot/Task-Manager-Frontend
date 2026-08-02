@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
@@ -45,10 +45,14 @@ export default function ReportEditPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const canManage = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+  const canManage = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   const [report, setReport] = useState(null);
-  const [activeTab, setActiveTab] = useState("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "overview";
+  function setActiveTab(tabId) {
+    setSearchParams({ tab: tabId });
+  }
   const [content, setContent] = useState({});
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);

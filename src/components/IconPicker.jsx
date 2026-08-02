@@ -9,12 +9,16 @@ import { ICON_COLORS, ICON_SET, parseRockIcon, serializeRockIcon, RockIconDispla
  *
  * Pass `resetKey` (e.g. `editing?.id ?? "create"`) so the picker re-syncs its
  * internal name/color state whenever the modal is reused for a different record.
+ *
+ * Pass `inline` to render the icon grid + color swatches directly in the form
+ * (no click-to-open popover, no backdrop) — useful when the picker is the
+ * primary control on a small form rather than a compact row action.
  */
-export default function IconPickerButton({ value, onChange, resetKey, size = 20, renderPreview }) {
+export default function IconPickerButton({ value, onChange, resetKey, size = 20, renderPreview, inline = false }) {
   const initial = parseRockIcon(value && value.includes("|") ? value : "");
   const [iconName, setIconName] = useState(initial.name);
   const [iconColor, setIconColor] = useState(initial.color);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(inline);
   const [search, setSearch] = useState("");
   const [hoveredLabel, setHoveredLabel] = useState(null);
 
@@ -35,33 +39,40 @@ export default function IconPickerButton({ value, onChange, resetKey, size = 20,
   function pickIcon(name) {
     setIconName(name);
     onChange(serializeRockIcon(name, iconColor));
-    setOpen(false);
+    if (!inline) setOpen(false);
   }
 
   function clear() {
     setIconName(null);
     onChange(null);
-    setOpen(false);
+    if (!inline) setOpen(false);
   }
 
   const previewStr = iconName ? serializeRockIcon(iconName, iconColor) : value;
 
   return (
-    <div className="relative inline-block shrink-0">
-      <button
-        type="button"
-        onClick={() => { setOpen((v) => !v); setSearch(""); setHoveredLabel(null); }}
-        className="flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
-        style={{ height: size + 16, width: size + 16 }}
-      >
-        {renderPreview ? renderPreview(previewStr) : <RockIconDisplay iconStr={previewStr} size={size} />}
-      </button>
+    <div className={inline ? "w-full" : "relative inline-block shrink-0"}>
+      {!inline && (
+        <button
+          type="button"
+          onClick={() => { setOpen((v) => !v); setSearch(""); setHoveredLabel(null); }}
+          className="flex items-center justify-center rounded-lg bg-slate-100 hover:bg-slate-200 transition-colors"
+          style={{ height: size + 16, width: size + 16 }}
+        >
+          {renderPreview ? renderPreview(previewStr) : <RockIconDisplay iconStr={previewStr} size={size} />}
+        </button>
+      )}
       {open && (
         <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-11 z-40 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl">
+          {!inline && <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />}
+          <div className={inline
+            ? "w-full rounded-xl border border-slate-200 bg-white p-3"
+            : "absolute left-0 top-11 z-40 w-80 rounded-xl border border-slate-200 bg-white p-3 shadow-2xl"}>
             <div className="mb-2.5 flex items-center justify-between">
-              <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Choose Icon</span>
+              <span className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                {inline && (renderPreview ? renderPreview(previewStr) : <RockIconDisplay iconStr={previewStr} size={16} />)}
+                Choose Icon
+              </span>
               {(iconName || value) && (
                 <button type="button" onClick={clear} className="text-xs text-slate-400 hover:text-slate-700">Clear</button>
               )}

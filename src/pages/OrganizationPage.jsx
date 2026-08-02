@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import Select from "../components/Select";
 import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
@@ -8,6 +9,8 @@ import { useConfirm } from "../context/ConfirmContext";
 import RichEditor from "../components/RichEditor";
 import DatePicker from "../components/DatePicker";
 import { organizationApi } from "../api/organizationApi";
+import { resolveMediaUrl } from "../api/client";
+import { billingApi } from "../api/billingApi";
 import { userApi } from "../api/userApi";
 import { rockApi } from "../api/rockApi";
 import { projectApi } from "../api/projectApi";
@@ -21,6 +24,28 @@ const TABS = [
   { id: "org-chart",   label: "Org Chart"   },
   { id: "objectives",  label: "Objectives"  },
 ];
+
+const LOGO_MAX_BYTES = 5 * 1024 * 1024;
+const LOGO_ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+const INDUSTRY_OPTIONS = [
+  "Software & Technology",
+  "Finance & Banking",
+  "Healthcare",
+  "Education",
+  "Retail & E-commerce",
+  "Manufacturing",
+  "Marketing & Advertising",
+  "Consulting",
+  "Other",
+];
+
+function getOrgInitials(name) {
+  if (!name) return "?";
+  const words = name.trim().split(/\s+/);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
 
 const SCOREBOARD_WEIGHT_FIELDS = [
   { key: "scoreboard_completion_weight", label: "Task Completion Rate", description: "Share of assigned tasks that were completed." },
@@ -54,6 +79,10 @@ function ValueIconDisplay({ iconStr, size = 24 }) {
 }
 
 function getColorClasses(colorId) {
+  if (colorId && colorId.startsWith("#")) {
+    // Custom hex color — rendered via inline style instead of Tailwind classes.
+    return { id: colorId, bg: "", text: "", border: "", hex: colorId };
+  }
   return VALUE_COLORS.find((c) => c.id === colorId) || VALUE_COLORS[0];
 }
 
@@ -204,8 +233,12 @@ function CoreValuesTab({ canManage }) {
               <div
                 key={v.id}
                 className={`group relative rounded-2xl border ${c.border} bg-white p-6 shadow-sm transition hover:shadow-md`}
+                style={c.hex ? { borderColor: c.hex } : undefined}
               >
-                <div className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${c.bg}`}>
+                <div
+                  className={`mb-4 inline-flex h-12 w-12 items-center justify-center rounded-xl text-2xl ${c.bg}`}
+                  style={c.hex ? { backgroundColor: `${c.hex}26` } : undefined}
+                >
                   <ValueIconDisplay iconStr={v.icon} size={24} />
                 </div>
                 <h3 className="text-base font-bold text-slate-900">{v.title}</h3>
@@ -271,11 +304,12 @@ function CoreValuesTab({ canManage }) {
                 resetKey={editing?.id ?? "create"}
                 size={20}
                 renderPreview={(v) => <ValueIconDisplay iconStr={v} size={20} />}
+                inline
               />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-slate-600">Color</label>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {VALUE_COLORS.map((c) => (
                   <button
                     key={c.id}
@@ -286,6 +320,21 @@ function CoreValuesTab({ canManage }) {
                     } transition`}
                   />
                 ))}
+                <label
+                  className={`relative flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-full border-2 text-[10px] font-bold text-white transition ${
+                    form.color?.startsWith("#") ? "border-slate-900 scale-110" : "border-transparent"
+                  }`}
+                  style={{ backgroundColor: form.color?.startsWith("#") ? form.color : "#94a3b8" }}
+                  title="Custom color"
+                >
+                  +
+                  <input
+                    type="color"
+                    value={form.color?.startsWith("#") ? form.color : "#94a3b8"}
+                    onChange={(e) => setForm({ ...form, color: e.target.value })}
+                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                  />
+                </label>
               </div>
             </div>
             <div className="flex justify-end gap-2 pt-2">
@@ -532,23 +581,18 @@ function OrgRoleModal({ title, subtitle, onClose, roles, users, form, setForm, o
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-600">Parent Role</label>
-                <div className="relative">
-                  <select
-                    value={form.parent_id ?? ""}
-                    onChange={(e) => setForm({ ...form, parent_id: e.target.value ? Number(e.target.value) : null })}
-                    className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:border-slate-400 focus:outline-none disabled:bg-slate-50 disabled:text-slate-400"
-                  >
-                    <option value="" disabled={rootAlreadyExists}>
-                      {rootAlreadyExists ? "None (only one top-level role allowed)" : "None (top-level role)"}
-                    </option>
-                    {parentOptions.map((r) => (
-                      <option key={r.id} value={r.id}>{r.name}</option>
-                    ))}
-                  </select>
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                  </svg>
-                </div>
+                <Select
+                  value={form.parent_id ?? ""}
+                  onChange={(e) => setForm({ ...form, parent_id: e.target.value ? Number(e.target.value) : null })}
+                  className="w-full px-3 py-2.5 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                >
+                  <option value="" disabled={rootAlreadyExists}>
+                    {rootAlreadyExists ? "None (only one top-level role allowed)" : "None (top-level role)"}
+                  </option>
+                  {parentOptions.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))}
+                </Select>
                 {rootAlreadyExists ? (
                   <p className="mt-1.5 flex items-center gap-1 rounded-lg bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700">
                     <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
@@ -819,7 +863,13 @@ function OrgChartTab({ canManage }) {
   const [roles, setRoles] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState("chart");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = searchParams.get("chart_view") || "chart";
+  function setView(value) {
+    const next = new URLSearchParams(searchParams);
+    next.set("chart_view", value);
+    setSearchParams(next);
+  }
   const [showModal, setShowModal] = useState(false);
   const [editingRole, setEditingRole] = useState(null);
   const [form, setForm] = useState(ROLE_FORM_DEFAULTS);
@@ -1350,19 +1400,14 @@ function ObjectiveModal({ editing, form, setForm, onSave, onClose, saving, users
 
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Project</label>
-                <div className="relative">
-                  <select
-                    value={form.project_id}
-                    onChange={(e) => setForm({ ...form, project_id: e.target.value })}
-                    className={`w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none ${form.project_id ? "text-slate-900" : "text-slate-400"}`}
-                  >
-                    <option value="">No project</option>
-                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                  <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                  </svg>
-                </div>
+                <Select
+                  value={form.project_id}
+                  onChange={(e) => setForm({ ...form, project_id: e.target.value })}
+                  className={`w-full px-3 py-2.5 text-sm ${form.project_id ? "text-slate-900" : "text-slate-400"}`}
+                >
+                  <option value="">No project</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
               </div>
 
               <div>
@@ -1383,11 +1428,12 @@ function ObjectiveModal({ editing, form, setForm, onSave, onClose, saving, users
                       <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
                     </svg>
                   </div>
-                  <select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}
-                    className="absolute inset-0 w-full cursor-pointer opacity-0">
+                  <Select value={form.owner_id} onChange={(e) => setForm({ ...form, owner_id: e.target.value })}
+                    wrapperClassName="absolute inset-0" hideChevron
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
-                  </select>
+                  </Select>
                 </div>
               </div>
 
@@ -1399,15 +1445,10 @@ function ObjectiveModal({ editing, form, setForm, onSave, onClose, saving, users
               {editing && (
                 <div>
                   <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
-                  <div className="relative">
-                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
-                      className="w-full appearance-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none">
-                      {OBJECTIVE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                    </select>
-                    <svg className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
-                  </div>
+                  <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+                    className="w-full px-3 py-2.5 text-sm">
+                    {OBJECTIVE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </Select>
                 </div>
               )}
 
@@ -1922,27 +1963,363 @@ function ScoreboardWeightsTab() {
   );
 }
 
+const PLAN_LABELS = { starter: "Starter", business: "Business" };
+
+function daysUntil(dateStr) {
+  if (!dateStr) return null;
+  const diffMs = new Date(dateStr).getTime() - Date.now();
+  return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+}
+
+function BillingTab() {
+  const [subscription, setSubscription] = useState(null);
+  const [usage, setUsage] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [portalLoading, setPortalLoading] = useState(false);
+  const [extraTeams, setExtraTeams] = useState(0);
+  const [extraUsers, setExtraUsers] = useState(0);
+  const [savingAddons, setSavingAddons] = useState(false);
+
+  useEffect(() => {
+    Promise.all([billingApi.getSubscription(), billingApi.getUsage()])
+      .then(([sub, usageData]) => {
+        setSubscription(sub);
+        setUsage(usageData);
+        setExtraTeams(sub.extra_teams);
+        setExtraUsers(sub.extra_users);
+      })
+      .catch(() => toast.error("Failed to load billing information."))
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleManageBilling() {
+    setPortalLoading(true);
+    try {
+      const { url } = await billingApi.createPortalSession();
+      window.location.href = url;
+    } catch (err) {
+      toast.error(err.message || "Failed to open billing portal.");
+      setPortalLoading(false);
+    }
+  }
+
+  async function handleSaveAddons() {
+    setSavingAddons(true);
+    try {
+      const updated = await billingApi.updateAddons(extraTeams, extraUsers);
+      setSubscription(updated);
+      const usageData = await billingApi.getUsage();
+      setUsage(usageData);
+      toast.success("Add-ons updated.");
+    } catch (err) {
+      toast.error(err.message || "Failed to update add-ons.");
+    } finally {
+      setSavingAddons(false);
+    }
+  }
+
+  if (loading || !subscription || !usage) {
+    return <div className="h-40 animate-pulse rounded-2xl bg-slate-100" />;
+  }
+
+  const trialDaysLeft = subscription.status === "trialing" ? daysUntil(subscription.trial_ends_at) : null;
+  const addonsChanged = extraTeams !== subscription.extra_teams || extraUsers !== subscription.extra_users;
+
+  return (
+    <div className="max-w-2xl space-y-6">
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-xl font-bold text-slate-900">
+              {PLAN_LABELS[subscription.plan] || subscription.plan} plan
+            </h2>
+            <p className="mt-1 text-sm text-slate-500 capitalize">
+              {subscription.billing_interval} billing
+              {subscription.cancel_at_period_end && " · cancels at period end"}
+            </p>
+          </div>
+          <span className={`rounded-full px-3 py-1 text-xs font-semibold ${
+            subscription.status === "trialing" ? "bg-amber-100 text-amber-700"
+            : subscription.status === "active" ? "bg-emerald-100 text-emerald-700"
+            : "bg-red-100 text-red-700"
+          }`}>
+            {subscription.status === "trialing" ? "Trial" : subscription.status}
+          </span>
+        </div>
+
+        {trialDaysLeft !== null && (
+          <p className="mt-3 text-sm text-slate-600">
+            {trialDaysLeft > 0
+              ? `${trialDaysLeft} day${trialDaysLeft === 1 ? "" : "s"} left in your trial.`
+              : "Your trial has ended."}
+          </p>
+        )}
+
+        <button
+          type="button"
+          onClick={handleManageBilling}
+          disabled={portalLoading}
+          className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+        >
+          {portalLoading ? "Opening..." : "Manage billing"}
+        </button>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900">Usage</h3>
+        <div className="mt-3 space-y-3">
+          <div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600">Teams</span>
+              <span className="font-semibold text-slate-900">
+                {usage.current_teams} / {usage.limits.max_teams === -1 ? "∞" : usage.limits.max_teams}
+              </span>
+            </div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-slate-900"
+                style={{ width: usage.limits.max_teams === -1 ? "0%" : `${Math.min(100, (usage.current_teams / usage.limits.max_teams) * 100)}%` }}
+              />
+            </div>
+          </div>
+          <div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-slate-600">Users</span>
+              <span className="font-semibold text-slate-900">
+                {usage.current_members} / {usage.limits.max_members === -1 ? "∞" : usage.limits.max_members}
+              </span>
+            </div>
+            <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div
+                className="h-full rounded-full bg-slate-900"
+                style={{ width: usage.limits.max_members === -1 ? "0%" : `${Math.min(100, (usage.current_members / usage.limits.max_members) * 100)}%` }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h3 className="text-base font-semibold text-slate-900">Extra teams &amp; users</h3>
+        <p className="mt-1 text-sm text-slate-500">$10/mo per extra team, $5/mo per extra user, added to your subscription.</p>
+        <div className="mt-4 grid grid-cols-2 gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Extra teams</label>
+            <input
+              type="number"
+              min={0}
+              value={extraTeams}
+              onChange={(e) => setExtraTeams(Math.max(0, Number(e.target.value)))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-500">Extra users</label>
+            <input
+              type="number"
+              min={0}
+              value={extraUsers}
+              onChange={(e) => setExtraUsers(Math.max(0, Number(e.target.value)))}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+            />
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={handleSaveAddons}
+          disabled={!addonsChanged || savingAddons}
+          className="mt-4 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {savingAddons ? "Saving..." : "Update add-ons"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function OrganizationPage() {
   const { user } = useAuth();
+  const confirm = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
 
+  const [org, setOrg] = useState(null);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
+
+  const [isEditOrgModalOpen, setIsEditOrgModalOpen] = useState(false);
+  const [orgEditForm, setOrgEditForm] = useState({ name: "", description: "", website: "", industry: "" });
+  const [isSavingOrg, setIsSavingOrg] = useState(false);
+  const [orgEditError, setOrgEditError] = useState("");
+
   const activeTab = searchParams.get("tab") || "core-values";
-  const canManage = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
-  const isAdmin = user?.role === "owner" || user?.role === "admin";
-  const tabs = isAdmin ? [...TABS, { id: "scoreboard-weights", label: "Scoreboard Weights" }] : TABS;
+  const isAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
+  const tabs = isAdmin ? [...TABS, { id: "billing", label: "Billing" }, { id: "scoreboard-weights", label: "Scoreboard Weights" }] : TABS;
+
+  useEffect(() => {
+    organizationApi.getCurrent().then(setOrg).catch(() => {});
+  }, []);
 
   function setTab(tabId) {
     setSearchParams({ tab: tabId });
   }
 
+  function openEditOrgModal() {
+    setOrgEditForm({
+      name: org?.name || "",
+      description: org?.description || "",
+      website: org?.website || "",
+      industry: org?.industry || "",
+    });
+    setOrgEditError("");
+    setIsEditOrgModalOpen(true);
+  }
+
+  function closeEditOrgModal() {
+    setIsEditOrgModalOpen(false);
+    setOrgEditError("");
+  }
+
+  async function handleEditOrgSubmit(e) {
+    e.preventDefault();
+    try {
+      setIsSavingOrg(true);
+      setOrgEditError("");
+      const updated = await organizationApi.updateCurrent({
+        name: orgEditForm.name,
+        description: orgEditForm.description || null,
+        website: orgEditForm.website || null,
+        industry: orgEditForm.industry || null,
+      });
+      setOrg(updated);
+      window.dispatchEvent(new Event("org-updated"));
+      toast.success("Organization details updated.");
+      closeEditOrgModal();
+    } catch (err) {
+      setOrgEditError(err.message || "Unable to update organization.");
+    } finally {
+      setIsSavingOrg(false);
+    }
+  }
+
+  async function handleLogoFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!LOGO_ACCEPTED_TYPES.includes(file.type)) {
+      toast.error("Logo must be a PNG, JPEG, or WEBP image.");
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      toast.error("Logo must be smaller than 5 MB.");
+      return;
+    }
+
+    try {
+      setIsUploadingLogo(true);
+      const updated = await organizationApi.uploadLogo(file);
+      setOrg(updated);
+      window.dispatchEvent(new Event("org-updated"));
+      toast.success("Organization logo updated.");
+    } catch (err) {
+      toast.error(err.message || "Failed to upload logo.");
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }
+
+  async function handleRemoveLogo() {
+    const ok = await confirm({ message: "Remove your organization's logo?", tone: "danger", confirmLabel: "Remove" });
+    if (!ok) return;
+    try {
+      setIsUploadingLogo(true);
+      const updated = await organizationApi.deleteLogo();
+      setOrg(updated);
+      window.dispatchEvent(new Event("org-updated"));
+      toast.success("Organization logo removed.");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove logo.");
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }
+
   return (
     <div className="w-full">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-3xl font-bold text-slate-900">Organization</h1>
-        <p className="mt-2 text-sm text-slate-600">
-          Manage your company's values, structure, and strategic objectives.
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div className="flex items-start gap-4">
+        <div className="group relative shrink-0">
+          <label
+            htmlFor="org-logo-input"
+            className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-lg font-bold text-white shadow-sm ${
+              isAdmin ? "cursor-pointer" : ""
+            }`}
+            title={isAdmin ? "Change organization logo" : undefined}
+          >
+            {org?.logo_url ? (
+              <img
+                src={resolveMediaUrl(org.logo_url)}
+                alt={`${org.name} logo`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              getOrgInitials(org?.name)
+            )}
+
+            {isAdmin && (
+              <span className="absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-950/0 text-transparent transition-colors group-hover:bg-slate-950/50 group-hover:text-white">
+                {isUploadingLogo ? (
+                  <span className="text-[10px] font-semibold">Uploading…</span>
+                ) : (
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 5.5A1.5 1.5 0 013.5 4h2.379a1.5 1.5 0 001.06-.44l.122-.12A2.5 2.5 0 018.939 3h2.122a2.5 2.5 0 011.878.44l.122.12a1.5 1.5 0 001.06.44H16.5A1.5 1.5 0 0118 5.5v9a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14.5v-9zM10 7a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" />
+                  </svg>
+                )}
+              </span>
+            )}
+          </label>
+          {isAdmin && (
+            <input
+              id="org-logo-input"
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              onChange={handleLogoFileChange}
+              disabled={isUploadingLogo}
+              className="hidden"
+            />
+          )}
+          {isAdmin && org?.logo_url && (
+            <button
+              type="button"
+              onClick={handleRemoveLogo}
+              disabled={isUploadingLogo}
+              title="Remove logo"
+              className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm hover:text-red-600"
+            >
+              <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+              </svg>
+            </button>
+          )}
+        </div>
+
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900">{org?.name || "Organization"}</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Manage your company's values, structure, and strategic objectives.
+          </p>
+        </div>
+        </div>
+
+        {isAdmin && (
+          <button
+            type="button"
+            onClick={openEditOrgModal}
+            className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Edit Organization
+          </button>
+        )}
       </div>
 
       {/* Tab nav */}
@@ -1966,10 +2343,101 @@ export default function OrganizationPage() {
       </div>
 
       {/* Tab content */}
-      {activeTab === "core-values" && <CoreValuesTab canManage={canManage} />}
-      {activeTab === "org-chart"   && <OrgChartTab canManage={canManage} />}
-      {activeTab === "objectives"  && <ObjectivesTab canManage={canManage} />}
+      {activeTab === "core-values" && <CoreValuesTab canManage={isAdmin} />}
+      {activeTab === "org-chart"   && <OrgChartTab canManage={isAdmin} />}
+      {activeTab === "objectives"  && <ObjectivesTab canManage={isAdmin} />}
+      {activeTab === "billing" && isAdmin && <BillingTab />}
       {activeTab === "scoreboard-weights" && isAdmin && <ScoreboardWeightsTab />}
+
+      {isAdmin && isEditOrgModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Edit Organization</h2>
+                <p className="mt-1 text-sm text-slate-500">Update your organization's details.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditOrgModal}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              >
+                ✕
+              </button>
+            </div>
+
+            {orgEditError && (
+              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {orgEditError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditOrgSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Organization name</label>
+                <input
+                  value={orgEditForm.name}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, name: e.target.value }))}
+                  required
+                  minLength={2}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Website</label>
+                <input
+                  value={orgEditForm.website}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, website: e.target.value }))}
+                  placeholder="https://acme.com"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Organization type</label>
+                <Select
+                  value={orgEditForm.industry}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, industry: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="">Select type</option>
+                  {INDUSTRY_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>{opt}</option>
+                  ))}
+                </Select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea
+                  value={orgEditForm.description}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, description: e.target.value }))}
+                  rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEditOrgModal}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingOrg}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingOrg ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

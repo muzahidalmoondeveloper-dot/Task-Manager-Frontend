@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
+import { userApi } from "../api/userApi";
 
 const THEME_STORAGE_KEY = "atm-theme";
 
@@ -101,12 +103,75 @@ function ThemeCard({ value, currentTheme, label, description, icon, onClick }) {
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, reloadUser } = useAuth();
 
-  const [activeTab, setActiveTab] = useState("profile");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "profile";
+  function setActiveTab(tabId) {
+    setSearchParams({ tab: tabId });
+  }
+
   const [theme, setTheme] = useState(
     localStorage.getItem(THEME_STORAGE_KEY) || "device"
   );
+
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ full_name: "", email: "" });
+  const [editError, setEditError] = useState("");
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
+  const [passwordError, setPasswordError] = useState("");
+  const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  function openEditModal() {
+    setEditForm({ full_name: user?.full_name || "", email: user?.email || "" });
+    setEditError("");
+    setIsEditModalOpen(true);
+  }
+
+  function closeEditModal() {
+    setIsEditModalOpen(false);
+    setEditError("");
+  }
+
+  async function handleEditSubmit(event) {
+    event.preventDefault();
+    try {
+      setIsSavingProfile(true);
+      setEditError("");
+      await userApi.updateMe({ full_name: editForm.full_name, email: editForm.email });
+      await reloadUser();
+      toast.success("Profile updated successfully.");
+      closeEditModal();
+    } catch (err) {
+      setEditError(err.message || "Unable to update profile.");
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }
+
+  async function handlePasswordSubmit(event) {
+    event.preventDefault();
+    if (passwordForm.new_password !== passwordForm.confirm_password) {
+      setPasswordError("New password and confirmation do not match.");
+      return;
+    }
+    try {
+      setIsSavingPassword(true);
+      setPasswordError("");
+      await userApi.changePassword({
+        current_password: passwordForm.current_password,
+        new_password: passwordForm.new_password,
+      });
+      toast.success("Password updated successfully.");
+      setPasswordForm({ current_password: "", new_password: "", confirm_password: "" });
+    } catch (err) {
+      setPasswordError(err.message || "Unable to update password.");
+    } finally {
+      setIsSavingPassword(false);
+    }
+  }
 
   useEffect(() => {
     applyTheme(theme);
@@ -152,24 +217,34 @@ export default function ProfilePage() {
 
       <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-6 py-6">
-          <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-            <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-slate-900 text-2xl font-bold text-white">
-              {getInitials(user)}
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-slate-900 text-2xl font-bold text-white">
+                {getInitials(user)}
+              </div>
+
+              <div className="min-w-0">
+                <h2 className="truncate text-2xl font-bold text-slate-900">
+                  {user?.full_name || "User Name"}
+                </h2>
+
+                <p className="mt-1 truncate text-sm text-slate-500">
+                  {user?.email}
+                </p>
+
+                <span className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-700">
+                  {formatRole(user?.role)}
+                </span>
+              </div>
             </div>
 
-            <div className="min-w-0">
-              <h2 className="truncate text-2xl font-bold text-slate-900">
-                {user?.full_name || "User Name"}
-              </h2>
-
-              <p className="mt-1 truncate text-sm text-slate-500">
-                {user?.email}
-              </p>
-
-              <span className="mt-3 inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-700">
-                {formatRole(user?.role)}
-              </span>
-            </div>
+            <button
+              type="button"
+              onClick={openEditModal}
+              className="shrink-0 rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Edit Profile
+            </button>
           </div>
         </div>
 
@@ -281,10 +356,136 @@ export default function ProfilePage() {
                   onClick={updateTheme}
                 />
               </div>
+
+              <div className="mt-8 border-t border-slate-200 pt-8">
+                <div className="mb-5">
+                  <h3 className="text-lg font-bold text-slate-900">
+                    Change Password
+                  </h3>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Update the password used to sign in to your account.
+                  </p>
+                </div>
+
+                <form onSubmit={handlePasswordSubmit} className="max-w-md space-y-4">
+                  {passwordError && (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {passwordError}
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Current password</label>
+                    <input
+                      type="password"
+                      value={passwordForm.current_password}
+                      onChange={(e) => setPasswordForm((current) => ({ ...current, current_password: e.target.value }))}
+                      required
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">New password</label>
+                    <input
+                      type="password"
+                      value={passwordForm.new_password}
+                      onChange={(e) => setPasswordForm((current) => ({ ...current, new_password: e.target.value }))}
+                      required
+                      minLength={8}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-1 block text-sm font-medium text-slate-700">Confirm new password</label>
+                    <input
+                      type="password"
+                      value={passwordForm.confirm_password}
+                      onChange={(e) => setPasswordForm((current) => ({ ...current, confirm_password: e.target.value }))}
+                      required
+                      minLength={8}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSavingPassword}
+                    className="rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isSavingPassword ? "Saving..." : "Update Password"}
+                  </button>
+                </form>
+              </div>
             </div>
           ) : null}
         </div>
       </div>
+
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Edit Profile</h2>
+                <p className="mt-1 text-sm text-slate-500">Update your name and email address.</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeEditModal}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              >
+                ✕
+              </button>
+            </div>
+
+            {editError && (
+              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {editError}
+              </div>
+            )}
+
+            <form onSubmit={handleEditSubmit} className="space-y-5">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Full name</label>
+                <input
+                  value={editForm.full_name}
+                  onChange={(e) => setEditForm((current) => ({ ...current, full_name: e.target.value }))}
+                  required
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Email</label>
+                <input
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm((current) => ({ ...current, email: e.target.value }))}
+                  required
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={closeEditModal}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingProfile}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSavingProfile ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

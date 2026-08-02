@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import Select from "../components/Select";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { projectApi } from "../api/projectApi";
+import { resolveMediaUrl } from "../api/client";
 import { taskApi } from "../api/taskApi";
 import { userApi } from "../api/userApi";
 import { teamApi } from "../api/teamApi";
 import { reportApi } from "../api/reportApi";
-import { projectInvitationApi } from "../api/projectInvitationApi";
+import { clientInvitationApi } from "../api/clientInvitationApi";
 import { taskRequestApi } from "../api/taskRequestApi";
+import { issueApi } from "../api/issueApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
 import DatePicker from "../components/DatePicker";
+import InviteClientModal from "../components/onboarding/InviteClientModal";
+import InvitationsTable from "../components/onboarding/InvitationsTable";
+import { getDueRowClassName } from "../utils/taskDueStatus";
 
 const TASK_REQUEST_STATUS_BADGE = {
   pending: "bg-amber-100 text-amber-700",
@@ -19,11 +25,55 @@ const TASK_REQUEST_STATUS_BADGE = {
   rejected: "bg-red-100 text-red-700",
 };
 
+const PROJECT_STATUS_BADGE = {
+  active: "bg-green-100 text-green-700",
+  paused: "bg-amber-100 text-amber-700",
+  inactive: "bg-slate-200 text-slate-600",
+  completed: "bg-blue-100 text-blue-700",
+  cancelled: "bg-red-100 text-red-700",
+};
+
+function getProjectStatusBadge(status) {
+  return PROJECT_STATUS_BADGE[status] || "bg-slate-100 text-slate-700";
+}
+
 const STATUS_OPTIONS = [
   { value: "todo", label: "Todo" },
   { value: "in_progress", label: "In Progress" },
   { value: "done", label: "Done" },
 ];
+
+const PRIORITY_OPTIONS = [
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
+
+const ISSUE_PRIORITY_OPTIONS = [
+  { value: 0, label: "None"     },
+  { value: 1, label: "Low"      },
+  { value: 2, label: "Medium"   },
+  { value: 3, label: "High"     },
+  { value: 4, label: "Urgent"   },
+  { value: 5, label: "Critical" },
+];
+
+const initialIssueForm = {
+  title: "",
+  description: "",
+  team_id: "",
+  priority: 0,
+};
+
+const LOGO_MAX_BYTES = 5 * 1024 * 1024;
+const LOGO_ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+function getProjectInitials(name) {
+  if (!name) return "?";
+  const words = name.trim().split(/\s+/);
+  if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
+  return (words[0][0] + words[words.length - 1][0]).toUpperCase();
+}
 
 const initialForm = {
   name: "",
@@ -93,7 +143,11 @@ export default function ProjectDetailPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
 
-  const [activeTab, setActiveTab] = useState("overview");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "overview";
+  function setActiveTab(tabId) {
+    setSearchParams({ tab: tabId });
+  }
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -107,13 +161,10 @@ export default function ProjectDetailPage() {
 
   const [pmAssignments, setPmAssignments] = useState([]);
   const [isLoadingPmAssignments, setIsLoadingPmAssignments] = useState(false);
-  const [selectedPmUserId, setSelectedPmUserId] = useState("");
 
   const [clientInvitations, setClientInvitations] = useState([]);
   const [isLoadingClientInvitations, setIsLoadingClientInvitations] = useState(false);
   const [isInviteClientModalOpen, setIsInviteClientModalOpen] = useState(false);
-  const [inviteClientEmail, setInviteClientEmail] = useState("");
-  const [isInvitingClient, setIsInvitingClient] = useState(false);
 
   const [taskRequests, setTaskRequests] = useState([]);
   const [isLoadingTaskRequests, setIsLoadingTaskRequests] = useState(false);
@@ -131,6 +182,10 @@ export default function ProjectDetailPage() {
   const [rocks, setRocks] = useState([]);
   const [kpis, setKpis] = useState([]);
   const [issues, setIssues] = useState([]);
+  const [isIssueModalOpen, setIsIssueModalOpen] = useState(false);
+  const [issueForm, setIssueForm] = useState(initialIssueForm);
+  const [isSubmittingIssue, setIsSubmittingIssue] = useState(false);
+  const [issueError, setIssueError] = useState("");
   const [objectives, setObjectives] = useState([]);
   const [objectiveRocks, setObjectiveRocks] = useState([]);
   const [rockKpis, setRockKpis] = useState([]);
@@ -138,17 +193,59 @@ export default function ProjectDetailPage() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   const [error, setError] = useState("");
 
   const isEditing = editingTaskId !== null;
-  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
   // Project Managers can create tasks under their assigned project(s) and set
   // the team, but cannot edit/delete/change status on tasks (backend-enforced
   // create-only scope) — kept as a separate flag so those controls stay
   // manager-only below.
-  const canCreateTasks = canManageTasks || user?.role === "project_manager";
-  const canManageProjects = user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+  const canCreateTasks = canManageTasks || user?.role === "project_manager" || user?.is_project_manager;
+  const canManageProjects = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+
+  async function handleLogoFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+
+    if (!LOGO_ACCEPTED_TYPES.includes(file.type)) {
+      toast.error("Logo must be a PNG, JPEG, or WEBP image.");
+      return;
+    }
+    if (file.size > LOGO_MAX_BYTES) {
+      toast.error("Logo must be smaller than 5 MB.");
+      return;
+    }
+
+    try {
+      setIsUploadingLogo(true);
+      const updated = await projectApi.uploadLogo(projectId, file);
+      setProject(updated);
+      toast.success("Project logo updated.");
+    } catch (err) {
+      toast.error(err.message || "Failed to upload logo.");
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }
+
+  async function handleRemoveLogo() {
+    const ok = await confirm({ message: "Remove this project's logo?", tone: "danger", confirmLabel: "Remove" });
+    if (!ok) return;
+    try {
+      setIsUploadingLogo(true);
+      const updated = await projectApi.deleteLogo(projectId);
+      setProject(updated);
+      toast.success("Project logo removed.");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove logo.");
+    } finally {
+      setIsUploadingLogo(false);
+    }
+  }
 
   const assignees = useMemo(() => {
     return users.filter((item) =>
@@ -351,19 +448,6 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, canManageProjects]);
 
-  async function handleAddPmAssignment() {
-    if (!selectedPmUserId) return;
-    const isReplacing = pmAssignments.length > 0;
-    try {
-      await projectApi.addMember(projectId, Number(selectedPmUserId));
-      setSelectedPmUserId("");
-      await loadPmAssignments();
-      toast.success(isReplacing ? "Project Manager replaced." : "Project Manager assigned.");
-    } catch (err) {
-      toast.error(err.message || "Failed to assign Project Manager.");
-    }
-  }
-
   async function handleRemovePmAssignment(userId) {
     try {
       await projectApi.removeMember(projectId, userId);
@@ -377,7 +461,7 @@ export default function ProjectDetailPage() {
   async function loadClientInvitations() {
     try {
       setIsLoadingClientInvitations(true);
-      const data = await projectInvitationApi.list(projectId);
+      const data = await clientInvitationApi.list(projectId);
       setClientInvitations(data);
     } catch (err) {
       toast.error(err.message || "Failed to load client invitations.");
@@ -392,20 +476,37 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, canCreateTasks]);
 
-  async function handleInviteClient(event) {
-    event.preventDefault();
-    if (!inviteClientEmail.trim()) return;
+  async function handleResendClientInvitation(invitationId) {
     try {
-      setIsInvitingClient(true);
-      await projectInvitationApi.invite(projectId, inviteClientEmail.trim());
-      toast.success("Client invitation sent.");
-      setInviteClientEmail("");
-      setIsInviteClientModalOpen(false);
+      await clientInvitationApi.resend(invitationId);
+      toast.success("Invitation resent.");
       await loadClientInvitations();
     } catch (err) {
-      toast.error(err.message || "Failed to invite client.");
-    } finally {
-      setIsInvitingClient(false);
+      toast.error(err.message || "Failed to resend invitation.");
+    }
+  }
+
+  async function handleDeleteDraftInvitation(invitationId) {
+    const ok = await confirm({ message: "Delete this draft invitation?", tone: "danger", confirmLabel: "Delete" });
+    if (!ok) return;
+    try {
+      await clientInvitationApi.deleteDraft(invitationId);
+      setClientInvitations((current) => current.filter((inv) => inv.id !== invitationId));
+      toast.success("Draft deleted.");
+    } catch (err) {
+      toast.error(err.message || "Failed to delete draft.");
+    }
+  }
+
+  async function handleRemoveInvitation(invitationId) {
+    const ok = await confirm({ message: "Remove this invitation from the list?", tone: "danger", confirmLabel: "Remove" });
+    if (!ok) return;
+    try {
+      await clientInvitationApi.deleteDraft(invitationId);
+      setClientInvitations((current) => current.filter((inv) => inv.id !== invitationId));
+      toast.success("Invitation removed.");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove invitation.");
     }
   }
 
@@ -413,8 +514,8 @@ export default function ProjectDetailPage() {
     const ok = await confirm({ message: "Revoke this client invitation?", tone: "danger", confirmLabel: "Revoke" });
     if (!ok) return;
     try {
-      await projectInvitationApi.revoke(projectId, invitationId);
-      setClientInvitations((current) => current.filter((inv) => inv.id !== invitationId));
+      await clientInvitationApi.revoke(invitationId);
+      await loadClientInvitations();
       toast.success("Invitation revoked.");
     } catch (err) {
       toast.error(err.message || "Failed to revoke invitation.");
@@ -506,6 +607,48 @@ export default function ProjectDetailPage() {
   function closeTaskModal() {
     resetForm();
     setIsTaskModalOpen(false);
+  }
+
+  function openIssueModal() {
+    setIssueForm(initialIssueForm);
+    setIssueError("");
+    setIsIssueModalOpen(true);
+  }
+
+  function closeIssueModal() {
+    setIsIssueModalOpen(false);
+    setIssueError("");
+  }
+
+  function handleIssueChange(e) {
+    const { name, value } = e.target;
+    setIssueForm((current) => ({ ...current, [name]: value }));
+  }
+
+  async function handleIssueSubmit(e) {
+    e.preventDefault();
+    if (!issueForm.team_id) {
+      setIssueError("Please select a team for this issue.");
+      return;
+    }
+    setIsSubmittingIssue(true);
+    setIssueError("");
+    try {
+      const created = await issueApi.create(Number(issueForm.team_id), {
+        title: issueForm.title,
+        description: issueForm.description || null,
+        project_id: project.id,
+        priority: Number(issueForm.priority),
+      });
+      setIssues((prev) => [created, ...prev]);
+      toast.success("Issue created.");
+      closeIssueModal();
+    } catch (err) {
+      setIssueError(err.message || "Unable to create issue.");
+      toast.error(err.message || "Unable to create issue.");
+    } finally {
+      setIsSubmittingIssue(false);
+    }
   }
 
   function handleEdit(task) {
@@ -617,6 +760,26 @@ export default function ProjectDetailPage() {
     }
   }
 
+  async function quickPriorityUpdate(task, priority) {
+    try {
+      const updatedTask = await taskApi.update(task.id, { priority });
+      setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
+      toast.success("Task priority updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update task priority.");
+    }
+  }
+
+  async function quickAssigneeUpdate(task, assigneeId) {
+    try {
+      const updatedTask = await taskApi.update(task.id, { assignee_id: assigneeId ? Number(assigneeId) : null });
+      setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
+      toast.success("Task assignee updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update task assignee.");
+    }
+  }
+
   function goToPreviousMonth() {
     setCalendarDate(
       new Date(calendarDate.getFullYear(), calendarDate.getMonth() - 1, 1)
@@ -709,20 +872,77 @@ export default function ProjectDetailPage() {
   return (
     <div className="w-full">
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-start">
-        <div>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-bold text-slate-900">
-              {project.name}
-            </h1>
+        <div className="flex items-start gap-4">
+          <div className="group relative shrink-0">
+            <label
+              htmlFor="project-logo-input"
+              className={`flex h-16 w-16 items-center justify-center overflow-hidden rounded-2xl bg-teal-500 text-lg font-bold text-white shadow-sm ${
+                canManageProjects ? "cursor-pointer" : ""
+              }`}
+              title={canManageProjects ? "Change project logo" : undefined}
+            >
+              {project.logo_url ? (
+                <img
+                  src={resolveMediaUrl(project.logo_url)}
+                  alt={`${project.name} logo`}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                getProjectInitials(project.name)
+              )}
 
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-medium capitalize text-slate-700">
-              {project.status}
-            </span>
+              {canManageProjects && (
+                <span className="absolute inset-0 flex items-center justify-center rounded-2xl bg-slate-950/0 text-transparent transition-colors group-hover:bg-slate-950/50 group-hover:text-white">
+                  {isUploadingLogo ? (
+                    <span className="text-[10px] font-semibold">Uploading…</span>
+                  ) : (
+                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M2 5.5A1.5 1.5 0 013.5 4h2.379a1.5 1.5 0 001.06-.44l.122-.12A2.5 2.5 0 018.939 3h2.122a2.5 2.5 0 011.878.44l.122.12a1.5 1.5 0 001.06.44H16.5A1.5 1.5 0 0118 5.5v9a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14.5v-9zM10 7a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" />
+                    </svg>
+                  )}
+                </span>
+              )}
+            </label>
+            {canManageProjects && (
+              <input
+                id="project-logo-input"
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                onChange={handleLogoFileChange}
+                disabled={isUploadingLogo}
+                className="hidden"
+              />
+            )}
+            {canManageProjects && project.logo_url && (
+              <button
+                type="button"
+                onClick={handleRemoveLogo}
+                disabled={isUploadingLogo}
+                title="Remove logo"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm hover:text-red-600"
+              >
+                <svg className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                </svg>
+              </button>
+            )}
           </div>
 
-          <p className="mt-2 text-sm text-slate-600">
-            {project.description || "No description added."}
-          </p>
+          <div>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-3xl font-bold text-slate-900">
+                {project.name}
+              </h1>
+
+              <span className={`rounded-full px-3 py-1 text-xs font-semibold capitalize ${getProjectStatusBadge(project.status)}`}>
+                {project.status}
+              </span>
+            </div>
+
+            <p className="mt-2 text-sm text-slate-600">
+              {project.description || "No description added."}
+            </p>
+          </div>
         </div>
 
         {canCreateTasks ? (
@@ -1199,11 +1419,22 @@ export default function ProjectDetailPage() {
 
             {/* ── Issues ── */}
             <div>
-              <div className="mb-4 flex items-center gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">Issues</h2>
-                <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
-                  {issues.length}
-                </span>
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-slate-900">Issues</h2>
+                  <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-semibold text-red-700">
+                    {issues.length}
+                  </span>
+                </div>
+                {canCreateTasks && (
+                  <button type="button" onClick={openIssueModal}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50">
+                    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M10.75 4.75a.75.75 0 00-1.5 0v4.5h-4.5a.75.75 0 000 1.5h4.5v4.5a.75.75 0 001.5 0v-4.5h4.5a.75.75 0 000-1.5h-4.5v-4.5z" />
+                    </svg>
+                    Create Issue
+                  </button>
+                )}
               </div>
 
               {issues.length === 0 ? (
@@ -1212,7 +1443,9 @@ export default function ProjectDetailPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z" />
                   </svg>
                   <p className="text-sm font-medium text-slate-500">No issues linked to this project.</p>
-                  <p className="mt-1 text-xs text-slate-400">Assign an issue to this project from the team's Issues tab.</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {canCreateTasks ? 'Click "Create Issue" to report the first one.' : "No issues have been reported for this project yet."}
+                  </p>
                 </div>
               ) : (
                 <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -1311,68 +1544,27 @@ export default function ProjectDetailPage() {
                     )}
                   </div>
                 )}
-
-                <div className="mt-4 flex gap-2">
-                  <select
-                    value={selectedPmUserId}
-                    onChange={(event) => setSelectedPmUserId(event.target.value)}
-                    className="w-full max-w-xs rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">
-                      {pmAssignments.length > 0 ? "Select a replacement Project Manager" : "Select a Project Manager to assign"}
-                    </option>
-                    {users
-                      .filter(
-                        (u) =>
-                          u.role === "project_manager" &&
-                          !pmAssignments.some((m) => m.user_id === u.id)
-                      )
-                      .map((u) => (
-                        <option key={u.id} value={u.id}>
-                          {u.full_name || u.email}
-                        </option>
-                      ))}
-                  </select>
-                  <button
-                    type="button"
-                    onClick={handleAddPmAssignment}
-                    disabled={!selectedPmUserId}
-                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                  >
-                    {pmAssignments.length > 0 ? "Replace" : "Assign"}
-                  </button>
-                </div>
               </div>
             ) : null}
 
-            {/* ── Pending client invitations (staff only) ── */}
+            {/* ── Client invitations (staff only) ── */}
             {canCreateTasks ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                 <h2 className="text-base font-semibold text-slate-900">Client Invitations</h2>
                 <p className="mt-1 text-sm text-slate-500">
                   Invited clients can view this project's status and submit task requests once they accept.
                 </p>
-
-                {isLoadingClientInvitations ? (
-                  <p className="mt-4 text-sm text-slate-500">Loading...</p>
-                ) : clientInvitations.length === 0 ? (
-                  <p className="mt-4 text-sm text-slate-400">No pending client invitations.</p>
-                ) : (
-                  <ul className="mt-4 divide-y divide-slate-100">
-                    {clientInvitations.map((inv) => (
-                      <li key={inv.id} className="flex items-center justify-between py-2.5">
-                        <span className="text-sm text-slate-700">{inv.email}</span>
-                        <button
-                          type="button"
-                          onClick={() => handleRevokeClientInvitation(inv.id)}
-                          className="text-xs font-semibold text-red-600 hover:underline"
-                        >
-                          Revoke
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
+                <div className="mt-4">
+                  <InvitationsTable
+                    invitations={clientInvitations}
+                    isLoading={isLoadingClientInvitations}
+                    showProject={false}
+                    onResend={handleResendClientInvitation}
+                    onRevoke={handleRevokeClientInvitation}
+                    onDeleteDraft={handleDeleteDraftInvitation}
+                    onRemove={handleRemoveInvitation}
+                  />
+                </div>
               </div>
             ) : null}
 
@@ -1389,6 +1581,10 @@ export default function ProjectDetailPage() {
 
                     <th className="min-w-72 px-4 py-3 text-left font-semibold text-slate-700">
                       Task Name
+                    </th>
+
+                    <th className="min-w-32 px-4 py-3 text-left font-semibold text-slate-700">
+                      Priority
                     </th>
 
                     <th className="min-w-44 px-4 py-3 text-left font-semibold text-slate-700">
@@ -1422,7 +1618,7 @@ export default function ProjectDetailPage() {
                 <tbody className="divide-y divide-slate-200">
                   {tasks.length ? (
                     tasks.map((task) => (
-                      <tr key={task.id} className="hover:bg-slate-50/70">
+                      <tr key={task.id} className={getDueRowClassName(task)}>
                         <td className="px-4 py-4 align-middle">
                           <button
                             type="button"
@@ -1459,8 +1655,37 @@ export default function ProjectDetailPage() {
                           </span>
                         </td>
 
+                        <td className="px-4 py-4 align-middle">
+                          {canManageTasks ? (
+                            <Select
+                              value={task.priority || "medium"}
+                              onChange={(event) => quickPriorityUpdate(task, event.target.value)}
+                              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none"
+                            >
+                              {PRIORITY_OPTIONS.map((p) => (
+                                <option key={p.value} value={p.value}>{p.label}</option>
+                              ))}
+                            </Select>
+                          ) : (
+                            <span className="capitalize text-slate-700">{task.priority || "medium"}</span>
+                          )}
+                        </td>
+
                         <td className="px-4 py-4 align-middle text-slate-700">
-                          {task.assignee?.full_name || "—"}
+                          {canManageTasks ? (
+                            <Select
+                              value={task.assignee_id || ""}
+                              onChange={(event) => quickAssigneeUpdate(task, event.target.value)}
+                              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none"
+                            >
+                              <option value="">Unassigned</option>
+                              {assignees.map((assignee) => (
+                                <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>
+                              ))}
+                            </Select>
+                          ) : (
+                            task.assignee?.full_name || "—"
+                          )}
                         </td>
 
                         <td className="px-4 py-4 align-middle text-slate-700">
@@ -1477,7 +1702,7 @@ export default function ProjectDetailPage() {
 
                         <td className="px-4 py-4 align-middle">
                           {canManageTasks ? (
-                            <select
+                            <Select
                               value={task.status}
                               onChange={(event) =>
                                 quickStatusUpdate(task, event.target.value)
@@ -1492,7 +1717,7 @@ export default function ProjectDetailPage() {
                                   {status.label}
                                 </option>
                               ))}
-                            </select>
+                            </Select>
                           ) : (
                             <span className={getStatusBadgeClass(task.status)}>
                               {getStatusLabel(task.status)}
@@ -1543,7 +1768,7 @@ export default function ProjectDetailPage() {
                   ) : (
                     <tr>
                       <td
-                        colSpan={canManageTasks ? 8 : 7}
+                        colSpan={canManageTasks ? 9 : 8}
                         className="px-4 py-8 text-center text-sm text-slate-500"
                       >
                         No tasks found in this project.
@@ -1601,7 +1826,7 @@ export default function ProjectDetailPage() {
                           Status
                         </label>
 
-                        <select
+                        <Select
                           value={task.status}
                           onChange={(event) =>
                             quickStatusUpdate(task, event.target.value)
@@ -1616,7 +1841,7 @@ export default function ProjectDetailPage() {
                               {statusOption.label}
                             </option>
                           ))}
-                        </select>
+                        </Select>
                       </div>
 
                       {canManageTasks ? (
@@ -1942,7 +2167,7 @@ export default function ProjectDetailPage() {
                     Assignee
                   </label>
 
-                  <select
+                  <Select
                     name="assignee_id"
                     value={formData.assignee_id}
                     onChange={handleChange}
@@ -1955,7 +2180,7 @@ export default function ProjectDetailPage() {
                         {assignee.full_name} — {assignee.role}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </div>
               )}
 
@@ -1964,7 +2189,7 @@ export default function ProjectDetailPage() {
                   Team
                 </label>
 
-                <select
+                <Select
                   name="team_id"
                   value={formData.team_id}
                   onChange={handleChange}
@@ -1977,7 +2202,7 @@ export default function ProjectDetailPage() {
                       {team.name}
                     </option>
                   ))}
-                </select>
+                </Select>
 
                 {!teams.length ? (
                   <p className="mt-1 text-xs text-slate-400">
@@ -1991,7 +2216,7 @@ export default function ProjectDetailPage() {
                   Status
                 </label>
 
-                <select
+                <Select
                   name="status"
                   value={formData.status}
                   onChange={handleChange}
@@ -2002,7 +2227,7 @@ export default function ProjectDetailPage() {
                       {status.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -2024,6 +2249,68 @@ export default function ProjectDetailPage() {
                     : isEditing
                     ? "Update Task"
                     : "Create Task"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
+      {canCreateTasks && isIssueModalOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Create Issue</h2>
+                <p className="mt-1 text-sm text-slate-500">Report a problem for {project.name} and assign it to a team.</p>
+              </div>
+              <button type="button" onClick={closeIssueModal}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+
+            {issueError && (
+              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{issueError}</div>
+            )}
+
+            <form onSubmit={handleIssueSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
+                <input name="title" value={issueForm.title} onChange={handleIssueChange} required
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea name="description" value={issueForm.description} onChange={handleIssueChange} rows={3}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Team *</label>
+                  <Select name="team_id" value={issueForm.team_id} onChange={handleIssueChange} required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    <option value="">Select team</option>
+                    {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                  <Select name="priority" value={issueForm.priority} onChange={handleIssueChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    {ISSUE_PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </Select>
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeIssueModal}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={isSubmittingIssue}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                  {isSubmittingIssue ? "Saving…" : "Create Issue"}
                 </button>
               </div>
             </form>
@@ -2053,7 +2340,7 @@ export default function ProjectDetailPage() {
             <form onSubmit={handleCreateReport} className="space-y-5">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Report Type</label>
-                <select
+                <Select
                   name="report_type"
                   value={reportForm.report_type}
                   onChange={handleReportFormChange}
@@ -2062,7 +2349,7 @@ export default function ProjectDetailPage() {
                   <option value="weekly">Weekly Project Report</option>
                   <option value="monthly">Monthly Project Report</option>
                   <option value="client">Client Project Report</option>
-                </select>
+                </Select>
               </div>
 
               <div>
@@ -2108,59 +2395,13 @@ export default function ProjectDetailPage() {
         </div>
       ) : null}
 
-      {isInviteClientModalOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
-            <div className="mb-6 flex items-center justify-between">
-              <div>
-                <h2 className="text-xl font-semibold text-slate-900">Invite Client</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  They'll get an email to set up an account and view{" "}
-                  <span className="font-medium text-slate-700">{project.name}</span>'s progress.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsInviteClientModalOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900"
-              >
-                ✕
-              </button>
-            </div>
-
-            <form onSubmit={handleInviteClient} className="space-y-5">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Client email</label>
-                <input
-                  type="email"
-                  value={inviteClientEmail}
-                  onChange={(event) => setInviteClientEmail(event.target.value)}
-                  required
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  placeholder="client@example.com"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsInviteClientModalOpen(false)}
-                  className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isInvitingClient}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-                >
-                  {isInvitingClient ? "Sending..." : "Send Invitation"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      ) : null}
+      <InviteClientModal
+        isOpen={isInviteClientModalOpen}
+        onClose={() => setIsInviteClientModalOpen(false)}
+        onInvited={loadClientInvitations}
+        lockedProjectId={projectId}
+        defaultProjectManagerId={pmAssignments[0]?.user_id || null}
+      />
 
       {convertingRequest ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
@@ -2185,7 +2426,7 @@ export default function ProjectDetailPage() {
             <form onSubmit={handleConvertRequest} className="space-y-5">
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Team</label>
-                <select
+                <Select
                   name="team_id"
                   value={convertForm.team_id}
                   onChange={handleConvertFormChange}
@@ -2198,12 +2439,12 @@ export default function ProjectDetailPage() {
                       {team.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Assignee (optional)</label>
-                <select
+                <Select
                   name="assignee_id"
                   value={convertForm.assignee_id}
                   onChange={handleConvertFormChange}
@@ -2215,13 +2456,13 @@ export default function ProjectDetailPage() {
                       {assignee.full_name} — {assignee.role}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
-                  <select
+                  <Select
                     name="priority"
                     value={convertForm.priority}
                     onChange={handleConvertFormChange}
@@ -2230,7 +2471,7 @@ export default function ProjectDetailPage() {
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
                     <option value="high">High</option>
-                  </select>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Due date</label>

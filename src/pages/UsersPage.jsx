@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import Select from "../components/Select";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { userApi } from "../api/userApi";
@@ -68,12 +69,16 @@ export default function UsersPage() {
   const [openActionMenuId, setOpenActionMenuId] = useState(null);
 
   // Tabs
-  const [activeTab, setActiveTab] = useState("members");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "members";
+  function setActiveTab(tabId) {
+    setSearchParams({ tab: tabId });
+  }
 
   // Edit modal
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingUserId, setEditingUserId] = useState(null);
-  const [editForm, setEditForm] = useState({ full_name: "", email: "", role: "team_member" });
+  const [editForm, setEditForm] = useState({ full_name: "", email: "", role: "team_member", is_org_admin: false, is_team_manager: false, is_project_manager: false });
   const [editError, setEditError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -86,12 +91,12 @@ export default function UsersPage() {
   // Pending invitations
   const [invitations, setInvitations] = useState([]);
 
-  const isAdmin = user?.role === "owner" || user?.role === "admin";
+  const isAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   const availableRoles = useMemo(() => {
-    const canAssignAdmin = user?.role === "owner" || user?.role === "admin";
+    const canAssignAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
     return ASSIGNABLE_ROLES.filter((r) => canAssignAdmin || r.value === "team_member");
-  }, [user?.role]);
+  }, [user?.role, user?.is_org_admin]);
 
   function getTeamsForUser(targetUser) {
     if (!targetUser) return [];
@@ -180,6 +185,9 @@ export default function UsersPage() {
       full_name: targetUser.full_name || "",
       email: targetUser.email || "",
       role: targetUser.role || "team_member",
+      is_org_admin: Boolean(targetUser.is_org_admin),
+      is_team_manager: Boolean(targetUser.is_team_manager),
+      is_project_manager: Boolean(targetUser.is_project_manager),
     });
     setEditError("");
     setIsEditModalOpen(true);
@@ -188,7 +196,7 @@ export default function UsersPage() {
   function closeEditModal() {
     setIsEditModalOpen(false);
     setEditingUserId(null);
-    setEditForm({ full_name: "", email: "", role: "team_member" });
+    setEditForm({ full_name: "", email: "", role: "team_member", is_org_admin: false, is_team_manager: false, is_project_manager: false });
     setEditError("");
   }
 
@@ -201,6 +209,9 @@ export default function UsersPage() {
         full_name: editForm.full_name,
         email: editForm.email,
         role: editForm.role,
+        is_org_admin: editForm.is_org_admin,
+        is_team_manager: editForm.role === "project_manager" ? editForm.is_team_manager : false,
+        is_project_manager: editForm.role === "team_manager" ? editForm.is_project_manager : false,
       };
       const updatedUser = await userApi.update(editingUserId, payload);
       setUsers((current) =>
@@ -361,7 +372,7 @@ export default function UsersPage() {
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
                   Role
                 </label>
-                <select
+                <Select
                   value={roleFilter}
                   onChange={(e) => setRoleFilter(e.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -370,13 +381,13 @@ export default function UsersPage() {
                   {ROLE_OPTIONS.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400">
                   Status
                 </label>
-                <select
+                <Select
                   value={statusFilter}
                   onChange={(e) => setStatusFilter(e.target.value)}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -386,7 +397,7 @@ export default function UsersPage() {
                   <option value="inactive">Inactive</option>
                   <option value="verified">Verified</option>
                   <option value="unverified">Unverified</option>
-                </select>
+                </Select>
               </div>
               <div className="flex items-end">
                 <button
@@ -468,8 +479,18 @@ export default function UsersPage() {
                             </td>
                             <td className="px-4 py-4 align-middle text-slate-700">{item.email}</td>
                             <td className="px-4 py-4 align-middle">
-                              <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-700">
-                                {formatRole(item.role)}
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className="inline-flex rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-700">
+                                  {formatRole(item.role)}
+                                </span>
+                                {item.is_org_admin && (
+                                  <span
+                                    className="inline-flex rounded-full bg-indigo-100 px-2 py-1 text-xs font-semibold text-indigo-700"
+                                    title="Also has Admin access"
+                                  >
+                                    +Admin
+                                  </span>
+                                )}
                               </span>
                             </td>
                             <td className="px-4 py-4 align-middle text-slate-700">
@@ -660,7 +681,7 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Role</label>
-                <select
+                <Select
                   value={editForm.role}
                   onChange={(e) => setEditForm((current) => ({ ...current, role: e.target.value }))}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -668,8 +689,58 @@ export default function UsersPage() {
                   {availableRoles.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
-                </select>
+                </Select>
               </div>
+              {isAdmin && (editForm.role === "team_manager" || editForm.role === "project_manager") && (
+                <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_org_admin}
+                    onChange={(e) => setEditForm((current) => ({ ...current, is_org_admin: e.target.checked }))}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-700">Also grant Admin access</span>
+                    <span className="block text-xs text-slate-500">
+                      Keeps their {formatRole(editForm.role)} role, and additionally gives full admin privileges.
+                    </span>
+                  </span>
+                </label>
+              )}
+              {isAdmin && editForm.role === "project_manager" && (
+                <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_team_manager}
+                    onChange={(e) => setEditForm((current) => ({ ...current, is_team_manager: e.target.checked }))}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-700">Also grant Team Manager access</span>
+                    <span className="block text-xs text-slate-500">
+                      Keeps their Project Manager role, and additionally lets them manage teams
+                      (they'll become selectable as a team's manager).
+                    </span>
+                  </span>
+                </label>
+              )}
+              {isAdmin && editForm.role === "team_manager" && (
+                <label className="flex items-start gap-2.5 rounded-lg border border-slate-200 px-3 py-2.5">
+                  <input
+                    type="checkbox"
+                    checked={editForm.is_project_manager}
+                    onChange={(e) => setEditForm((current) => ({ ...current, is_project_manager: e.target.checked }))}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-700">Also grant Project Manager access</span>
+                    <span className="block text-xs text-slate-500">
+                      Keeps their Team Manager role, and additionally lets them be assigned as a
+                      project's Project Manager.
+                    </span>
+                  </span>
+                </label>
+              )}
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -731,7 +802,7 @@ export default function UsersPage() {
               </div>
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Role</label>
-                <select
+                <Select
                   value={inviteForm.role}
                   onChange={(e) => setInviteForm((current) => ({ ...current, role: e.target.value }))}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-slate-900"
@@ -739,7 +810,7 @@ export default function UsersPage() {
                   {availableRoles.map((r) => (
                     <option key={r.value} value={r.value}>{r.label}</option>
                   ))}
-                </select>
+                </Select>
               </div>
               <div className="flex gap-3 pt-2">
                 <button

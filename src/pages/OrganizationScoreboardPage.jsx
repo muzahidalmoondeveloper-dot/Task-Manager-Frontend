@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { scoreboardApi } from "../api/scoreboardApi";
@@ -18,11 +18,37 @@ const VIEW_OPTIONS = [
 
 export default function OrganizationScoreboardPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
-  const [view, setView] = useState("employee");
-  const [period, setPeriod] = useState("this_month");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+  const view = searchParams.get("view") || "employee";
+  const period = searchParams.get("period") || "this_month";
+  const customStart = searchParams.get("start_date") || "";
+  const customEnd = searchParams.get("end_date") || "";
+
+  function updateParams(updates) {
+    const next = new URLSearchParams(searchParams);
+    for (const [key, value] of Object.entries(updates)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    setSearchParams(next);
+  }
+
+  function setView(value) {
+    updateParams({ view: value });
+  }
+
+  function setPeriod(value) {
+    updateParams({ period: value });
+  }
+
+  function setCustomStart(value) {
+    updateParams({ start_date: value });
+  }
+
+  function setCustomEnd(value) {
+    updateParams({ end_date: value });
+  }
 
   const [data, setData] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -262,6 +288,7 @@ export default function OrganizationScoreboardPage() {
                   <th className="w-14 px-4 py-3 text-left font-semibold text-slate-700">Rank</th>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Manager</th>
                   <th className="px-4 py-3 text-right font-semibold text-slate-700">Teams</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Projects</th>
                   <th className="px-4 py-3 text-right font-semibold text-slate-700">Employees</th>
                   <th className="px-4 py-3 text-right font-semibold text-slate-700">Score</th>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Performance Level</th>
@@ -272,7 +299,7 @@ export default function OrganizationScoreboardPage() {
               </thead>
               <tbody className="divide-y divide-slate-200">
                 {isLoading ? (
-                  <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-400">Loading scoreboard...</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-400">Loading scoreboard...</td></tr>
                 ) : managerRows.length ? (
                   managerRows.map((row) => (
                     <tr key={row.manager_id} onClick={() => navigate(`/users/${row.manager_id}/scoreboard`)} className="cursor-pointer hover:bg-slate-50/70">
@@ -286,6 +313,7 @@ export default function OrganizationScoreboardPage() {
                         </div>
                       </td>
                       <td className="px-4 py-3 text-right align-middle text-slate-600">{row.team_count}</td>
+                      <td className="px-4 py-3 text-right align-middle text-slate-600">{row.project_count}</td>
                       <td className="px-4 py-3 text-right align-middle text-slate-600">{row.employee_count}</td>
                       <td className="px-4 py-3 text-right align-middle font-semibold text-slate-900">{row.has_data ? row.rounded_score : "—"}</td>
                       <td className="px-4 py-3 align-middle">
@@ -303,7 +331,7 @@ export default function OrganizationScoreboardPage() {
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan={9} className="px-4 py-10 text-center text-sm text-slate-500">No managers match the selected period.</td></tr>
+                  <tr><td colSpan={10} className="px-4 py-10 text-center text-sm text-slate-500">No managers match the selected period.</td></tr>
                 )}
               </tbody>
             </table>

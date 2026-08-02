@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import Select from "../components/Select";
 import toast from "react-hot-toast";
 
 import { projectApi } from "../api/projectApi";
+import { resolveMediaUrl } from "../api/client";
 import { userApi } from "../api/userApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
@@ -76,7 +78,7 @@ export default function ProjectsPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
   const canManageProjects =
-    user?.role === "owner" || user?.role === "admin" || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   const [projects, setProjects] = useState([]);
   const [formData, setFormData] = useState(initialForm);
@@ -153,7 +155,7 @@ export default function ProjectsPage() {
     async function loadProjectManagers() {
       try {
         const data = await userApi.list();
-        setProjectManagers(data.filter((u) => u.role === "project_manager"));
+        setProjectManagers(data.filter((u) => u.role === "project_manager" || u.is_project_manager));
       } catch {
         setProjectManagers([]);
       }
@@ -361,7 +363,7 @@ export default function ProjectsPage() {
               Status
             </label>
 
-            <select
+            <Select
               value={statusFilter}
               onChange={(event) => setStatusFilter(event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -373,7 +375,7 @@ export default function ProjectsPage() {
                   {status.label}
                 </option>
               ))}
-            </select>
+            </Select>
           </div>
 
           <div className="flex items-end">
@@ -461,8 +463,16 @@ export default function ProjectsPage() {
                     <tr key={project.id} className="hover:bg-slate-50/70">
                       <td className="px-4 py-4 align-middle">
                         <div className="flex items-center gap-3">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-teal-500 text-sm font-bold text-white">
-                            {getProjectInitials(project)}
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-teal-500 text-sm font-bold text-white">
+                            {project.logo_url ? (
+                              <img
+                                src={resolveMediaUrl(project.logo_url)}
+                                alt={`${project.name} logo`}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              getProjectInitials(project)
+                            )}
                           </div>
 
                           <div className="min-w-0">
@@ -619,7 +629,7 @@ export default function ProjectsPage() {
                   Status
                 </label>
 
-                <select
+                <Select
                   name="status"
                   value={formData.status}
                   onChange={handleChange}
@@ -630,7 +640,7 @@ export default function ProjectsPage() {
                       {status.label}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div>
@@ -638,7 +648,7 @@ export default function ProjectsPage() {
                   Project Manager
                 </label>
 
-                <select
+                <Select
                   name="project_manager_id"
                   value={formData.project_manager_id}
                   onChange={handleChange}
@@ -650,7 +660,7 @@ export default function ProjectsPage() {
                       {manager.full_name || manager.email}
                     </option>
                   ))}
-                </select>
+                </Select>
 
                 {projectManagers.length === 0 ? (
                   <p className="mt-1 text-xs text-slate-400">

@@ -16,6 +16,11 @@ import ProjectDetailPage from "../pages/ProjectDetailPage";
 import ReportEditPage from "../pages/ReportEditPage";
 import ReportPreviewPage from "../pages/ReportPreviewPage";
 import TasksPage from "../pages/TasksPage";
+import IssuesPage from "../pages/IssuesPage";
+import ClientOnboardingsPage from "../pages/ClientOnboardingsPage";
+import ClientInvitationsPage from "../pages/ClientInvitationsPage";
+import OnboardingDetailPage from "../pages/OnboardingDetailPage";
+import OnboardingTemplatesPage from "../pages/OnboardingTemplatesPage";
 import TeamDetailPage from "../pages/TeamDetailPage";
 import AppLayout from "../components/layout/AppLayout";
 import ClientLayout from "../components/layout/ClientLayout";
@@ -61,6 +66,11 @@ export default function AppRouter() {
             <Route path="/reports/:reportId/edit" element={<ReportEditPage />} />
             <Route path="/reports/:reportId/preview" element={<ReportPreviewPage />} />
             <Route path="/tasks" element={<TasksPage />} />
+            <Route path="/issues" element={<IssuesPage />} />
+            <Route path="/onboarding" element={<ClientOnboardingsPage />} />
+            <Route path="/onboarding/templates" element={<OnboardingTemplatesPage />} />
+            <Route path="/onboarding/invitations" element={<ClientInvitationsPage />} />
+            <Route path="/onboarding/:onboardingId" element={<OnboardingDetailPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/organization" element={<OrganizationPage />} />
           </Route>

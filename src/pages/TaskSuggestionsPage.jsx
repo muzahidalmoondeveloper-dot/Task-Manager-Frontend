@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import Select from "../components/Select";
 import toast from "react-hot-toast";
 
 import { projectApi } from "../api/projectApi";
@@ -464,7 +465,7 @@ export default function TaskSuggestionsPage() {
               Source
             </label>
 
-            <select
+            <Select
               value={sourceFilter}
               onChange={(event) => setSourceFilter(event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -472,7 +473,7 @@ export default function TaskSuggestionsPage() {
               <option value="all">All sources</option>
               <option value="email">Email</option>
               <option value="transcript">Transcript</option>
-            </select>
+            </Select>
           </div>
 
           <div>
@@ -480,7 +481,7 @@ export default function TaskSuggestionsPage() {
               Confidence
             </label>
 
-            <select
+            <Select
               value={confidenceFilter}
               onChange={(event) => setConfidenceFilter(event.target.value)}
               className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 outline-none focus:border-slate-900"
@@ -489,7 +490,7 @@ export default function TaskSuggestionsPage() {
               <option value="high">High</option>
               <option value="medium">Medium</option>
               <option value="low">Low</option>
-            </select>
+            </Select>
           </div>
 
           <div className="flex items-end">
@@ -774,7 +775,7 @@ export default function TaskSuggestionsPage() {
                   Project
                 </label>
 
-                <select
+                <Select
                   value={getApprovalValue(selectedSuggestion, "project_id")}
                   onChange={(event) =>
                     updateApprovalData(
@@ -792,7 +793,7 @@ export default function TaskSuggestionsPage() {
                       {project.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div>
@@ -800,7 +801,7 @@ export default function TaskSuggestionsPage() {
                   Team
                 </label>
 
-                <select
+                <Select
                   value={getApprovalValue(selectedSuggestion, "team_id")}
                   onChange={(event) =>
                     updateApprovalData(
@@ -818,7 +819,7 @@ export default function TaskSuggestionsPage() {
                       {team.name}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div>
@@ -826,7 +827,7 @@ export default function TaskSuggestionsPage() {
                   Assignee
                 </label>
 
-                <select
+                <Select
                   value={getApprovalValue(selectedSuggestion, "assignee_id")}
                   onChange={(event) =>
                     updateApprovalData(
@@ -844,7 +845,7 @@ export default function TaskSuggestionsPage() {
                       {item.full_name} — {formatRole(item.role)}
                     </option>
                   ))}
-                </select>
+                </Select>
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
