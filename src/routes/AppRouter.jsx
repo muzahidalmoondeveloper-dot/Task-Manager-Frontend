@@ -26,6 +26,7 @@ import AppLayout from "../components/layout/AppLayout";
 import ClientLayout from "../components/layout/ClientLayout";
 import ClientProjectViewPage from "../pages/ClientProjectViewPage";
 import IntegrationsPage from "../pages/IntegrationsPage";
+import AIAssistantPage from "../pages/AIAssistantPage";
 import ProfilePage from "../pages/ProfilePage";
 import OrganizationPage from "../pages/OrganizationPage";
 import OrganizationSetupPage from "../pages/OrganizationSetupPage";
@@ -72,6 +73,7 @@ export default function AppRouter() {
             <Route path="/onboarding/invitations" element={<ClientInvitationsPage />} />
             <Route path="/onboarding/:onboardingId" element={<OnboardingDetailPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
+            <Route path="/ai-assistant" element={<AIAssistantPage />} />
             <Route path="/organization" element={<OrganizationPage />} />
           </Route>
 
