@@ -8,27 +8,139 @@ import { useAuth } from "../../context/AuthContext";
 const ACCEPTED_TYPES = ".pdf,.docx,.txt,.md,.csv,.json";
 const MAX_FILE_MB = 20;
 
-// ─── Simple markdown renderer ─────────────────────────────────────────────────
+// ─── Markdown renderer ─────────────────────────────────────────────────────────
+// A small, dependency-free block-level parser covering what LLM replies
+// actually use: headings, bold/italic, inline code, fenced code blocks,
+// bulleted/numbered lists, blockquotes, and links. Raw text is HTML-escaped
+// before any markdown substitution so the model's own output can never
+// inject markup (dangerouslySetInnerHTML only ever sees escaped text plus
+// the specific tags we insert ourselves).
+function escapeHtml(str) {
+  return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function renderInline(text) {
+  return escapeHtml(text)
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(?<!\*)\*([^*\n]+?)\*(?!\*)/g, "<em>$1</em>")
+    .replace(/`([^`]+?)`/g, '<code class="bg-slate-100 text-slate-800 px-1.5 py-0.5 rounded text-[0.85em] font-mono">$1</code>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-indigo-600 underline hover:text-indigo-700">$1</a>');
+}
+
+const BLOCK_STARTERS = [/^```/, /^#{1,3}\s/, /^[•*-]\s+/, /^\d+[.)]\s+/, /^>\s?/];
+
 function renderMarkdown(text) {
   if (!text) return null;
   const lines = text.split("\n");
-  const elements = [];
-  lines.forEach((line, i) => {
-    const isBullet = /^[•\-\*]\s+/.test(line);
-    let content = isBullet ? line.replace(/^[•\-\*]\s+/, "") : line;
-    content = content
-      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-      .replace(/\*(.+?)\*/g, "<em>$1</em>")
-      .replace(/`(.+?)`/g, '<code class="bg-slate-700 px-1 rounded text-xs">$1</code>');
-    if (isBullet) {
-      elements.push(<li key={i} className="ml-4 list-disc" dangerouslySetInnerHTML={{ __html: content }} />);
-    } else if (content.trim() === "") {
-      elements.push(<br key={i} />);
-    } else {
-      elements.push(<p key={i} className="mb-1" dangerouslySetInnerHTML={{ __html: content }} />);
+  const blocks = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    const fence = line.match(/^```(\w*)\s*$/);
+    if (fence) {
+      const codeLines = [];
+      i++;
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // consume closing fence (or run off the end if the model never closed it)
+      blocks.push({ type: "code", content: codeLines.join("\n") });
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,3})\s+(.*)$/);
+    if (heading) {
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
+      i++;
+      continue;
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quoteLines = [];
+      while (i < lines.length && /^>\s?/.test(lines[i])) {
+        quoteLines.push(lines[i].replace(/^>\s?/, ""));
+        i++;
+      }
+      blocks.push({ type: "quote", text: quoteLines.join(" ") });
+      continue;
+    }
+
+    if (/^[•*-]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^[•*-]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^[•*-]\s+/, ""));
+        i++;
+      }
+      blocks.push({ type: "ul", items });
+      continue;
+    }
+
+    if (/^\d+[.)]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\d+[.)]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\d+[.)]\s+/, ""));
+        i++;
+      }
+      blocks.push({ type: "ol", items });
+      continue;
+    }
+
+    if (line.trim() === "") {
+      i++;
+      continue;
+    }
+
+    // Paragraph — swallow following lines until the next blank line or the
+    // start of another block type, so a hard-wrapped reply reads as one block.
+    const paraLines = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() !== "" && !BLOCK_STARTERS.some((re) => re.test(lines[i]))) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    blocks.push({ type: "p", text: paraLines.join(" ") });
+  }
+
+  return blocks.map((block, idx) => {
+    switch (block.type) {
+      case "code":
+        return (
+          <pre key={idx} className="bg-slate-900 text-slate-100 text-xs rounded-lg px-3 py-2.5 my-2 overflow-x-auto">
+            <code>{block.content}</code>
+          </pre>
+        );
+      case "heading": {
+        const sizeClass = block.level === 1 ? "text-base font-bold mt-2 mb-1" : block.level === 2 ? "text-sm font-bold mt-2 mb-1" : "text-sm font-semibold mt-1.5 mb-1";
+        return <p key={idx} className={sizeClass} dangerouslySetInnerHTML={{ __html: renderInline(block.text) }} />;
+      }
+      case "quote":
+        return (
+          <blockquote key={idx} className="border-l-2 border-slate-300 pl-3 my-1.5 text-slate-500 italic" dangerouslySetInnerHTML={{ __html: renderInline(block.text) }} />
+        );
+      case "ul":
+        return (
+          <ul key={idx} className="list-disc pl-5 my-1 space-y-0.5">
+            {block.items.map((item, j) => (
+              <li key={j} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
+            ))}
+          </ul>
+        );
+      case "ol":
+        return (
+          <ol key={idx} className="list-decimal pl-5 my-1 space-y-0.5">
+            {block.items.map((item, j) => (
+              <li key={j} dangerouslySetInnerHTML={{ __html: renderInline(item) }} />
+            ))}
+          </ol>
+        );
+      case "p":
+      default:
+        return <p key={idx} className="mb-1.5 last:mb-0" dangerouslySetInnerHTML={{ __html: renderInline(block.text) }} />;
     }
   });
-  return elements;
 }
 
 // ─── File attachment badge (inside message bubble) ────────────────────────────

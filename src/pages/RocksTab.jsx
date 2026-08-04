@@ -409,18 +409,15 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Teams</label>
                 <div className="relative">
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 py-2.5 pl-3 pr-8">
                     <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                       <path d="M7 8a3 3 0 100-6 3 3 0 000 6zM13.5 9a2.5 2.5 0 100-5 2.5 2.5 0 000 5z" />
                       <path d="M2.5 15.5A4.5 4.5 0 017 11h.25a4.5 4.5 0 014.5 4.5.5.5 0 01-.5.5H3a.5.5 0 01-.5-.5z" />
                     </svg>
                     <span className="flex-1 truncate text-sm text-slate-700">{selectedTeam?.name || team?.name || "—"}</span>
-                    <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
                   </div>
                   <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}
-                    wrapperClassName="absolute inset-0" hideChevron
+                    wrapperClassName="absolute inset-0"
                     className="h-full w-full cursor-pointer opacity-0">
                     {(teams || []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </Select>
@@ -431,17 +428,14 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Project</label>
                 <div className="relative">
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 py-2.5 pl-3 pr-8">
                     <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                       <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
                     </svg>
                     <span className="flex-1 truncate text-sm text-slate-700">{selectedProject?.name || "No project"}</span>
-                    <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
                   </div>
                   <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
-                    wrapperClassName="absolute inset-0" hideChevron
+                    wrapperClassName="absolute inset-0"
                     className="h-full w-full cursor-pointer opacity-0">
                     <option value="">No project</option>
                     {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -453,7 +447,7 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Owner</label>
                 <div className="relative">
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 py-2.5 pl-3 pr-8">
                     {selectedOwner ? (
                       <>
                         <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white ${AVATAR_COLORS[selectedOwner.id % AVATAR_COLORS.length]}`}>
@@ -462,13 +456,10 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
                         <span className="truncate text-sm text-slate-700">{selectedOwner.full_name || selectedOwner.email}</span>
                       </>
                     ) : <span className="text-sm text-slate-400">Unassigned</span>}
-                    <svg className="ml-auto h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
                   </div>
                   <Select value={ownerId} onChange={(e) => setOwnerId(e.target.value)}
-                    wrapperClassName="absolute inset-0" hideChevron
-          className="h-full w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0"
+                    className="h-full w-full cursor-pointer opacity-0">
                     <option value="">Unassigned</option>
                     {users.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
                   </Select>
@@ -489,17 +480,14 @@ function RockModal({ team, users, objectives, teams, projects, currentUser, edit
               <div>
                 <label className="mb-1.5 block text-xs font-semibold text-slate-500">Status</label>
                 <div className="relative">
-                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+                  <div className="flex items-center gap-2 rounded-xl border border-slate-200 py-2.5 pl-3 pr-8">
                     <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-semibold ${statusCfg.bg} ${statusCfg.text}`}>
                       {statusCfg.icon} {statusCfg.label}
                     </span>
-                    <svg className="ml-auto h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
-                    </svg>
                   </div>
                   <Select value={status} onChange={(e) => setStatus(e.target.value)}
-                    wrapperClassName="absolute inset-0" hideChevron
-          className="h-full w-full cursor-pointer opacity-0">
+                    wrapperClassName="absolute inset-0"
+                    className="h-full w-full cursor-pointer opacity-0">
                     {SELECTABLE_STATUSES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </Select>
                 </div>
@@ -681,7 +669,13 @@ function RockRow({ rock, users, canManage, onEdit, onDelete, onArchive, onStatus
             {Date.now() - new Date(rock.created_at).getTime() < 7 * 24 * 60 * 60 * 1000 && (
               <span className="rounded bg-slate-900 px-1.5 py-0.5 text-[10px] font-bold text-white">NEW</span>
             )}
-            {rock.objective && (
+            {/* Only show this standalone objective indicator when that same
+                objective isn't already surfaced by LinkedItemsHoverIcon
+                below — otherwise the exact same relationship shows up as
+                two separate link-ish icons on one row. */}
+            {rock.objective && !(rock.links || []).some(
+              (l) => l.linked_type === "objective" && l.linked_id === rock.objective.id
+            ) && (
               <svg className="h-3.5 w-3.5 text-slate-400" viewBox="0 0 20 20" fill="currentColor" title={rock.objective.title}>
                 <path d="M12.232 4.232a2.5 2.5 0 013.536 3.536l-1.225 1.224a.75.75 0 001.061 1.06l1.224-1.224a4 4 0 00-5.656-5.656l-3 3a4 4 0 00.225 5.865.75.75 0 00.977-1.138 2.5 2.5 0 01-.142-3.667l3-3z" />
                 <path d="M11.603 7.963a.75.75 0 00-.977 1.138 2.5 2.5 0 01.142 3.667l-3 3a2.5 2.5 0 01-3.536-3.536l1.225-1.224a.75.75 0 00-1.061-1.06l-1.224 1.224a4 4 0 105.656 5.656l3-3a4 4 0 00-.225-5.865z" />
@@ -743,14 +737,9 @@ function RockRow({ rock, users, canManage, onEdit, onDelete, onArchive, onStatus
                         Edit
                       </button>
                       <button type="button"
-                        disabled={rock.status !== "complete"}
-                        onClick={() => { if (rock.status === "complete") { setMenuOpen(false); onArchive(rock); } }}
-                        className={`flex w-full items-center gap-2 px-3 py-2 text-sm transition-colors ${
-                          rock.status === "complete"
-                            ? "text-slate-700 hover:bg-slate-50 cursor-pointer"
-                            : "text-slate-300 cursor-not-allowed"
-                        }`}>
-                        <svg className={`h-4 w-4 ${rock.status === "complete" ? "text-slate-400" : "text-slate-200"}`} viewBox="0 0 20 20" fill="currentColor">
+                        onClick={() => { setMenuOpen(false); onArchive(rock); }}
+                        className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-700 transition-colors hover:bg-slate-50">
+                        <svg className="h-4 w-4 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
                           <path d="M2 3a1 1 0 00-1 1v1a1 1 0 001 1h16a1 1 0 001-1V4a1 1 0 00-1-1H2zM2 7.5h16l-1.673 9.535A1 1 0 0115.34 18H4.66a1 1 0 01-.987-.965L2 7.5z" />
                         </svg>
                         Archive

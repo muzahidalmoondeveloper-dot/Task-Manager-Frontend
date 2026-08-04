@@ -900,13 +900,6 @@ function SidebarContent({
               />
               {canViewOnboarding && (
                 <div className={cx("space-y-1", !collapsed && "pl-3")}>
-                  <NestedItem
-                    to="/onboarding/invitations"
-                    icon={<OnboardingIcon />}
-                    label="Invitations"
-                    collapsed={collapsed}
-                    onClick={handleClickNav}
-                  />
                   {isAdmin && (
                     <NestedItem
                       to="/onboarding/templates"

@@ -21,6 +21,11 @@ const STEP_STATUS_CFG = {
   skipped:           { label: "Skipped",           badge: "bg-slate-100 text-slate-500" },
 };
 
+// Matches backend ONBOARDING_TERMINAL_STATUSES — a client can accumulate more
+// than one onboarding record for the same project over time (a prior cycle
+// that finished, then a new one); the active one should always win.
+const ONBOARDING_TERMINAL_STATUSES = new Set(["completed", "rejected", "cancelled", "archived"]);
+
 const STATUS_DOT = {
   active: "bg-emerald-500",
   completed: "bg-blue-500",
@@ -241,7 +246,10 @@ export default function ClientProjectViewPage() {
         setIsLoadingOnboarding(true);
         const records = await onboardingApi.list();
         if (cancelled) return;
-        const match = (records || []).find((r) => String(r.project?.id) === String(projectId));
+        const projectRecords = (records || []).filter((r) => String(r.project?.id) === String(projectId));
+        // Prefer the active (non-terminal) onboarding for this project — a
+        // finished/cancelled prior cycle should never shadow a fresh one.
+        const match = projectRecords.find((r) => !ONBOARDING_TERMINAL_STATUSES.has(r.status)) || projectRecords[0] || null;
         if (match) {
           const full = await onboardingApi.get(match.id);
           if (!cancelled) setOnboarding(full);

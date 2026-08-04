@@ -18,7 +18,6 @@ import ReportPreviewPage from "../pages/ReportPreviewPage";
 import TasksPage from "../pages/TasksPage";
 import IssuesPage from "../pages/IssuesPage";
 import ClientOnboardingsPage from "../pages/ClientOnboardingsPage";
-import ClientInvitationsPage from "../pages/ClientInvitationsPage";
 import OnboardingDetailPage from "../pages/OnboardingDetailPage";
 import OnboardingTemplatesPage from "../pages/OnboardingTemplatesPage";
 import TeamDetailPage from "../pages/TeamDetailPage";
@@ -70,7 +69,6 @@ export default function AppRouter() {
             <Route path="/issues" element={<IssuesPage />} />
             <Route path="/onboarding" element={<ClientOnboardingsPage />} />
             <Route path="/onboarding/templates" element={<OnboardingTemplatesPage />} />
-            <Route path="/onboarding/invitations" element={<ClientInvitationsPage />} />
             <Route path="/onboarding/:onboardingId" element={<OnboardingDetailPage />} />
             <Route path="/integrations" element={<IntegrationsPage />} />
             <Route path="/ai-assistant" element={<AIAssistantPage />} />
