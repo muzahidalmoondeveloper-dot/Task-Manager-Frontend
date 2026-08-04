@@ -15,7 +15,7 @@ import { issueApi } from "../api/issueApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
 import DatePicker from "../components/DatePicker";
-import InviteClientModal from "../components/onboarding/InviteClientModal";
+import StartOnboardingModal from "../components/onboarding/StartOnboardingModal";
 import InvitationsTable from "../components/onboarding/InvitationsTable";
 import { getDueRowClassName } from "../utils/taskDueStatus";
 
@@ -160,7 +160,6 @@ export default function ProjectDetailPage() {
   const [reportForm, setReportForm] = useState({ report_type: "monthly", title: "", period_start: "", period_end: "" });
 
   const [pmAssignments, setPmAssignments] = useState([]);
-  const [isLoadingPmAssignments, setIsLoadingPmAssignments] = useState(false);
 
   const [clientInvitations, setClientInvitations] = useState([]);
   const [isLoadingClientInvitations, setIsLoadingClientInvitations] = useState(false);
@@ -432,13 +431,10 @@ export default function ProjectDetailPage() {
 
   async function loadPmAssignments() {
     try {
-      setIsLoadingPmAssignments(true);
       const data = await projectApi.listMembers(projectId);
       setPmAssignments(data);
     } catch (err) {
       toast.error(err.message || "Failed to load assigned project managers.");
-    } finally {
-      setIsLoadingPmAssignments(false);
     }
   }
 
@@ -448,15 +444,6 @@ export default function ProjectDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, canManageProjects]);
 
-  async function handleRemovePmAssignment(userId) {
-    try {
-      await projectApi.removeMember(projectId, userId);
-      setPmAssignments((current) => current.filter((m) => m.user_id !== userId));
-      toast.success("Project Manager unassigned.");
-    } catch (err) {
-      toast.error(err.message || "Failed to unassign Project Manager.");
-    }
-  }
 
   async function loadClientInvitations() {
     try {
@@ -952,7 +939,7 @@ export default function ProjectDetailPage() {
               onClick={() => setIsInviteClientModalOpen(true)}
               className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             >
-              Invite Client
+              Start Client Onboarding
             </button>
             <button
               type="button"
@@ -1508,44 +1495,6 @@ export default function ProjectDetailPage() {
                 </div>
               </div>
             )}
-
-            {/* ── Project Manager assignment (Owner/Admin/Team Manager only) ── */}
-            {canManageProjects ? (
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h2 className="text-base font-semibold text-slate-900">Project Manager</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  A project has exactly one Project Manager. They can view this project, create tasks
-                  under it, and assign those tasks to any team. Assigning a new one replaces the current one.
-                </p>
-
-                {isLoadingPmAssignments ? (
-                  <p className="mt-4 text-sm text-slate-500">Loading...</p>
-                ) : (
-                  <div className="mt-4">
-                    {pmAssignments.length === 0 ? (
-                      <p className="text-sm text-slate-400">No Project Manager assigned yet.</p>
-                    ) : (
-                      pmAssignments.map((member) => (
-                        <span
-                          key={member.id}
-                          className="flex w-fit items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700"
-                        >
-                          {member.full_name || member.email}
-                          <button
-                            type="button"
-                            onClick={() => handleRemovePmAssignment(member.user_id)}
-                            className="text-slate-400 hover:text-red-600"
-                            title="Remove"
-                          >
-                            ✕
-                          </button>
-                        </span>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            ) : null}
 
             {/* ── Client invitations (staff only) ── */}
             {canCreateTasks ? (
@@ -2395,10 +2344,10 @@ export default function ProjectDetailPage() {
         </div>
       ) : null}
 
-      <InviteClientModal
+      <StartOnboardingModal
         isOpen={isInviteClientModalOpen}
         onClose={() => setIsInviteClientModalOpen(false)}
-        onInvited={loadClientInvitations}
+        onCreated={loadClientInvitations}
         lockedProjectId={projectId}
         defaultProjectManagerId={pmAssignments[0]?.user_id || null}
       />

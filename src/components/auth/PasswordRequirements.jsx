@@ -31,29 +31,44 @@ export function CheckIcon({ met }) {
   );
 }
 
+// Mirrors backend/app/core/security.py::WEAK_PASSWORDS — keep in sync.
+const WEAK_PASSWORDS = new Set([
+  "password", "password123", "12345678", "qwerty123", "abc123456",
+  "password1", "welcome123", "123456789", "qwertyuiop", "letmein",
+  "admin123", "passw0rd",
+]);
+
+// Mirrors backend/app/core/security.py::validate_password_strength — every
+// rule the backend can reject a password for should have a matching, live
+// checkable entry here so a user never hits a 400 the UI didn't warn about.
 export const PASSWORD_RULES = [
   { id: "length",  label: "At least 8 characters",        test: (p) => p.length >= 8 },
   { id: "upper",   label: "One uppercase letter (A–Z)",   test: (p) => /[A-Z]/.test(p) },
   { id: "lower",   label: "One lowercase letter (a–z)",   test: (p) => /[a-z]/.test(p) },
   { id: "number",  label: "One number (0–9)",              test: (p) => /[0-9]/.test(p) },
   { id: "special", label: "One special character (!@#…)", test: (p) => /[^A-Za-z0-9]/.test(p) },
+  { id: "no-repeat",     label: "No 4+ repeated characters in a row", test: (p) => p.length > 0 && !/(.)\1{3,}/.test(p) },
+  { id: "no-sequential", label: "No sequential characters (e.g. abcd, 1234)", test: (p) => p.length > 0 && !/(0123|1234|2345|3456|4567|5678|6789|abcd|bcde|cdef)/i.test(p) },
+  { id: "not-common",    label: "Not a common, easily guessed password", test: (p) => p.length > 0 && !WEAK_PASSWORDS.has(p.toLowerCase()) },
 ];
 
 export function PasswordStrengthBar({ password }) {
   const passed = PASSWORD_RULES.filter((r) => r.test(password)).length;
   const pct = (passed / PASSWORD_RULES.length) * 100;
+  // Thresholds are percentage-based (not raw counts) so they stay correct
+  // regardless of how many rules are in PASSWORD_RULES.
   const color =
-    passed <= 1 ? "bg-red-400" :
-    passed <= 2 ? "bg-orange-400" :
-    passed <= 3 ? "bg-amber-400" :
-    passed === 4 ? "bg-teal-400" :
-                  "bg-emerald-500";
+    pct <= 20 ? "bg-red-400" :
+    pct <= 40 ? "bg-orange-400" :
+    pct <= 60 ? "bg-amber-400" :
+    pct < 100 ? "bg-teal-400" :
+                "bg-emerald-500";
   const label =
-    passed <= 1 ? "Very weak" :
-    passed <= 2 ? "Weak" :
-    passed <= 3 ? "Fair" :
-    passed === 4 ? "Strong" :
-                  "Very strong";
+    pct <= 20 ? "Very weak" :
+    pct <= 40 ? "Weak" :
+    pct <= 60 ? "Fair" :
+    pct < 100 ? "Strong" :
+                "Very strong";
 
   return (
     <div className="mt-2">

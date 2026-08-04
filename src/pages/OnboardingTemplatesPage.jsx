@@ -250,6 +250,10 @@ export default function OnboardingTemplatesPage() {
   }
 
   async function handleDelete(template) {
+    if (template.is_default) {
+      toast.error("This is the default template — set another template as default first.");
+      return;
+    }
     if (!(await confirm({ message: `Delete "${template.name}"?`, tone: "danger", confirmLabel: "Delete" }))) return;
     try {
       await onboardingApi.deleteTemplate(template.id);
@@ -257,6 +261,16 @@ export default function OnboardingTemplatesPage() {
       toast.success("Template deleted.");
     } catch (err) {
       toast.error(err.message || "Unable to delete template.");
+    }
+  }
+
+  async function handleSetDefault(template) {
+    try {
+      await onboardingApi.updateTemplate(template.id, { is_default: true });
+      toast.success(`"${template.name}" is now the default template.`);
+      load();
+    } catch (err) {
+      toast.error(err.message || "Unable to set this template as default.");
     }
   }
 
@@ -310,7 +324,7 @@ export default function OnboardingTemplatesPage() {
                 </span>
               </div>
               {t.description && <p className="mt-2 line-clamp-2 text-sm text-slate-500">{t.description}</p>}
-              <div className="mt-4 flex gap-2">
+              <div className="mt-4 flex flex-wrap gap-2">
                 <button type="button" onClick={() => openEdit(t)}
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                   Edit
@@ -319,10 +333,21 @@ export default function OnboardingTemplatesPage() {
                   className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
                   Duplicate
                 </button>
-                <button type="button" onClick={() => handleDelete(t)}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">
+                <button
+                  type="button"
+                  onClick={() => handleDelete(t)}
+                  disabled={t.is_default}
+                  title={t.is_default ? "Set another template as default first" : undefined}
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+                >
                   Delete
                 </button>
+                {!t.is_default && (
+                  <button type="button" onClick={() => handleSetDefault(t)}
+                    className="w-full rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100">
+                    Set as default
+                  </button>
+                )}
               </div>
             </div>
           ))}
