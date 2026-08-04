@@ -100,6 +100,14 @@ function IntegrationsIcon() {
 }
 
 
+function AIAssistantIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M2 5a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2h-3l-3 3v-3H4a2 2 0 01-2-2V5zm4 3a1 1 0 100 2 1 1 0 000-2zm3 1a1 1 0 112 0 1 1 0 01-2 0zm5-1a1 1 0 100 2 1 1 0 000-2z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function OrganizationIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -1065,6 +1073,14 @@ function SidebarContent({
           {!isTeamMember ? (
             <>
               <SectionTitle collapsed={collapsed}>Automation</SectionTitle>
+
+              <NavItem
+                to="/ai-assistant"
+                icon={<AIAssistantIcon />}
+                label="AI Assistant"
+                collapsed={collapsed}
+                onClick={handleClickNav}
+              />
 
               <NavItem
                 to="/integrations"

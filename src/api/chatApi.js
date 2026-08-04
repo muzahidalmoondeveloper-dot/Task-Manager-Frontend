@@ -50,4 +50,28 @@ export const chatApi = {
   deleteSession(sessionId) {
     return apiClient.delete(`/chat/sessions/${sessionId}`);
   },
+
+  confirmChangeSet(changeSetId) {
+    return apiClient.post(`/chat/change-sets/${changeSetId}/confirm`);
+  },
+
+  cancelChangeSet(changeSetId) {
+    return apiClient.post(`/chat/change-sets/${changeSetId}/cancel`);
+  },
+
+  undoOperation(operationId) {
+    return apiClient.post(`/chat/operations/${operationId}/undo`);
+  },
+
+  listApprovals() {
+    return apiClient.get("/chat/approvals");
+  },
+
+  approveRequest(approvalId) {
+    return apiClient.post(`/chat/approvals/${approvalId}/approve`);
+  },
+
+  rejectRequest(approvalId) {
+    return apiClient.post(`/chat/approvals/${approvalId}/reject`);
+  },
 };
