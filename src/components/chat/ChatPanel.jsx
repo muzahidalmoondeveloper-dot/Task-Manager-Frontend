@@ -127,7 +127,7 @@ function MessageBubble({ msg, actions, onNavigate, onConfirmChangeSet, onCancelC
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"} mb-4`}>
       {!isUser && (
-        <div className="w-7 h-7 rounded-full bg-slate-900 flex items-center justify-center text-xs font-bold text-white mr-2 flex-shrink-0 mt-0.5">AI</div>
+        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 flex items-center justify-center text-xs font-bold text-white mr-2 flex-shrink-0 mt-0.5 shadow-sm">AI</div>
       )}
       <div className={`max-w-[85%] ${isUser ? "items-end" : "items-start"} flex flex-col`}>
         <div className={`rounded-2xl px-4 py-2.5 text-sm leading-relaxed tracking-[0.01em] ${isUser ? "bg-slate-900 text-white rounded-tr-sm" : "bg-white border border-slate-200 text-slate-800 rounded-tl-sm"}`}>
@@ -183,7 +183,7 @@ function MessageBubble({ msg, actions, onNavigate, onConfirmChangeSet, onCancelC
 function TypingIndicator() {
   return (
     <div className="flex items-center gap-2 mb-3">
-      <div className="w-7 h-7 rounded-full bg-slate-900 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">AI</div>
+      <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 flex items-center justify-center text-xs font-bold text-white flex-shrink-0 shadow-sm">AI</div>
       <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-4 py-3 flex gap-1">
         {[0, 1, 2].map((i) => (
           <span key={i} className="w-2 h-2 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: `${i * 0.15}s` }} />
@@ -284,6 +284,14 @@ function ApprovalsPanel({ approvals, onApprove, onReject, busyId }) {
     </div>
   );
 }
+
+// ─── Quick suggestions (floating widget's empty state only) ───────────────────
+const QUICK_SUGGESTIONS = [
+  "Show my tasks",
+  "Create a task for today",
+  "What's overdue?",
+  "Summarise my week",
+];
 
 // ─── Voice recording indicator ───────────────────────────────────────────────
 const WAVEFORM_BAR_WIDTH = 2;
@@ -440,6 +448,9 @@ const voiceSupported =
 export default function ChatPanel({ variant = "floating", onClose, autoFocus = true }) {
   const { user } = useAuth();
   const isTeamMember = user?.role === "team_member";
+  const visibleSuggestions = QUICK_SUGGESTIONS.filter(
+    (s) => !(isTeamMember && s === "Create a task for today")
+  );
   const isAdmin = user?.role === "admin";
   const [showSidebar, setShowSidebar] = useState(false);
   const [showApprovals, setShowApprovals] = useState(false);
@@ -771,7 +782,7 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
           The box only grows as tall as the content needs (see the
           auto-resize effect above), so it stays a compact single line
           until the message actually wraps. */}
-      <div className={`flex flex-col gap-1 bg-white rounded-2xl border transition-colors px-3 py-1.5 ${isListening ? "border-red-300" : "border-slate-200 focus-within:border-slate-300"}`}>
+      <div className={`flex flex-col gap-1 bg-white rounded-2xl border transition-all px-3 py-1.5 ${isListening ? "border-red-300" : "border-slate-200 focus-within:border-indigo-300 focus-within:ring-4 focus-within:ring-indigo-100 focus-within:shadow-sm"}`}>
         <textarea
           ref={inputRef}
           value={input}
@@ -834,15 +845,15 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
             <button
               onClick={() => handleSend()}
               disabled={!canSend || isListening}
-              className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-colors ${
+              className={`flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all ${
                 canSend && !isListening
-                  ? "text-slate-800 hover:bg-slate-100"
+                  ? "bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 text-white shadow-sm shadow-indigo-500/30 hover:shadow-md hover:shadow-indigo-500/40 hover:scale-105"
                   : "text-slate-300"
-              } disabled:cursor-not-allowed`}
+              } disabled:cursor-not-allowed disabled:hover:scale-100`}
               title="Send"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19V5m0 0l-6 6m6-6l6 6" />
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 19V5m0 0l-6 6m6-6l6 6" />
               </svg>
             </button>
           </div>
@@ -901,46 +912,51 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
             and New chat are grouped together as labeled buttons (rather than
             split to opposite corners) since they're the two things people
             actually reach for together when managing conversations. */}
-        <div className={`flex items-center justify-between flex-shrink-0 ${isFloating ? "px-4 py-3 bg-white border-b border-slate-100" : "px-3 py-2.5"}`}>
-          <div className="flex items-center gap-1.5">
+        <div className={`flex items-center justify-between flex-shrink-0 ${isFloating ? "px-3 py-2.5 bg-white border-b border-slate-100" : "px-3 py-2.5"}`}>
+          <div className="flex items-center gap-1.5 min-w-0">
             <button
               onClick={() => setShowSidebar((v) => !v)}
-              className={`flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors ${showSidebar ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"}`}
+              className={`flex items-center gap-1.5 text-xs font-medium rounded-lg transition-colors ${isFloating ? "p-2" : "px-2.5 py-1.5"} ${showSidebar ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"}`}
               title="Chat history"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
-              History
+              {!isFloating && "History"}
             </button>
             <button
               onClick={startNewChat}
-              className="flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 px-2.5 py-1.5 rounded-lg transition-colors"
+              className={`flex items-center gap-1.5 text-xs font-medium text-slate-600 hover:text-slate-900 hover:bg-slate-200/70 rounded-lg transition-colors ${isFloating ? "p-2" : "px-2.5 py-1.5"}`}
               title="New chat"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 4.5v15m7.5-7.5h-15" />
               </svg>
-              New chat
+              {!isFloating && "New chat"}
             </button>
             {isFloating && (
-              <div className="ml-1">
-                <h3 className="text-sm font-semibold text-slate-800">AI Task Assistant</h3>
-                <p className="text-xs text-slate-400">Chat · Voice · Upload files{isTeamMember ? "" : " · Create tasks"}</p>
+              <div className="flex items-center gap-2 ml-0.5 min-w-0">
+                <span className="w-6 h-6 flex-shrink-0 rounded-full bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 flex items-center justify-center">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="w-3.5 h-3.5 text-white" fill="currentColor" viewBox="0 0 20 20">
+                    <path d="M10 2l1.6 4.8L16.4 8 11.6 9.6 10 14.4 8.4 9.6 3.6 8l4.8-1.2L10 2z" />
+                    <path d="M16 13l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z" />
+                  </svg>
+                </span>
+                <h3 className="text-sm font-semibold text-slate-800 truncate">AI Assistant</h3>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-shrink-0">
             {isAdmin && (
               <button
                 onClick={() => setShowApprovals((v) => !v)}
-                className={`relative flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg transition-colors ${showApprovals ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"}`}
+                className={`relative flex items-center gap-1.5 text-xs font-medium rounded-lg transition-colors ${isFloating ? "p-2" : "px-2.5 py-1.5"} ${showApprovals ? "bg-slate-200 text-slate-900" : "text-slate-600 hover:text-slate-900 hover:bg-slate-200/70"}`}
                 title="Pending approvals"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                Approvals
+                {!isFloating && "Approvals"}
                 {approvals.length > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-amber-500 text-[10px] leading-4 text-white font-semibold text-center">
                     {approvals.length}
@@ -949,7 +965,7 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
               </button>
             )}
             {isFloating && (
-              <button onClick={onClose} className="text-slate-500 hover:text-slate-800 transition-colors p-1">
+              <button onClick={onClose} className="text-slate-500 hover:text-slate-800 transition-colors p-2">
                 <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -958,13 +974,13 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
           </div>
         </div>
 
-        {isEmpty ? (
-          /* Nothing sent yet — the composer itself sits centered in the
-             middle of the panel (no welcome text/suggestions), then moves
-             down to its normal bottom position as soon as the first
+        {isEmpty && !isFloating ? (
+          /* Full page, nothing sent yet — the composer itself sits centered
+             in the middle of the panel (no welcome text/suggestions), then
+             moves down to its normal bottom position as soon as the first
              message is sent. */
           <div className="flex-1 flex items-center justify-center px-4 min-h-0">
-            <div className={isFloating ? "w-full" : "mx-auto w-full max-w-2xl"}>
+            <div className="mx-auto w-full max-w-2xl">
               {composerBox}
             </div>
           </div>
@@ -975,6 +991,47 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
                 full width since it's already narrow. */}
             <div className="flex-1 overflow-y-auto px-4 py-4">
               <div className={isFloating ? "" : "mx-auto w-full max-w-2xl"}>
+                {/* The floating widget keeps its original welcome message +
+                    quick-suggestion pills in the empty state — only the full
+                    page dropped those in favor of a centered composer. */}
+                {isEmpty && isFloating && (
+                  <div className="flex flex-col items-center justify-center text-center gap-4 h-full">
+                    <span className="w-12 h-12 rounded-2xl bg-gradient-to-br from-indigo-500 via-violet-500 to-fuchsia-500 shadow-lg shadow-indigo-500/25 flex items-center justify-center">
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-6 h-6 text-white" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M10 2l1.6 4.8L16.4 8 11.6 9.6 10 14.4 8.4 9.6 3.6 8l4.8-1.2L10 2z" />
+                        <path d="M16 13l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7.7-2z" />
+                      </svg>
+                    </span>
+                    <p className="bg-gradient-to-r from-indigo-600 via-violet-600 to-fuchsia-600 bg-clip-text text-transparent font-bold text-xl">
+                      Welcome, how can I help?
+                    </p>
+                    <div className="flex flex-wrap gap-2 justify-center mt-1">
+                      {visibleSuggestions.map((s, i) => {
+                        const dotColors = ["bg-indigo-400", "bg-emerald-400", "bg-amber-400", "bg-fuchsia-400"];
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => handleSend(s)}
+                            className="flex items-center gap-1.5 text-xs bg-white hover:bg-slate-50 text-slate-600 hover:text-slate-900 px-3 py-1.5 rounded-full transition-all border border-slate-200 hover:border-slate-300 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+                          >
+                            <span className={`w-1.5 h-1.5 rounded-full ${dotColors[i % dotColors.length]}`} />
+                            {s}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <button
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 text-xs text-indigo-600 hover:text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 hover:border-indigo-200 px-4 py-2 rounded-full transition-all shadow-sm hover:shadow-md"
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
+                      </svg>
+                      Upload a file to analyse
+                    </button>
+                  </div>
+                )}
+
                 {messages.map((msg) => (
                   <MessageBubble
                     key={msg.id}
