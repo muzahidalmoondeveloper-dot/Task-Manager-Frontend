@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 
+import DatePicker from "../DatePicker";
 import Select from "../Select";
 import { clientInvitationApi } from "../../api/clientInvitationApi";
 import { onboardingApi } from "../../api/onboardingApi";
@@ -15,7 +16,6 @@ const initialForm = {
   company_name: "",
   phone_number: "",
   project_id: "",
-  project_manager_id: "",
   template_id: "",
   due_date: "",
   expires_in_days: 3,
@@ -34,8 +34,12 @@ const initialForm = {
  *    user account and the ClientOnboarding record together.
  * Used both from the central Client Onboarding page and as a shortcut
  * from inside a project (via lockedProjectId).
+ *
+ * No Project Manager field — the project already has one assigned via
+ * ProjectMembership (see ProjectDetailPage's "Project Managers" section);
+ * the backend derives it automatically instead of asking for it again here.
  */
-export default function StartOnboardingModal({ isOpen, onClose, onCreated, lockedProjectId = null, defaultProjectManagerId = null }) {
+export default function StartOnboardingModal({ isOpen, onClose, onCreated, lockedProjectId = null }) {
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -51,7 +55,6 @@ export default function StartOnboardingModal({ isOpen, onClose, onCreated, locke
 
   const isExistingClient = Boolean(form.client_user_id);
   const existingClients = useMemo(() => users.filter((u) => u.role === "client"), [users]);
-  const managers = useMemo(() => users.filter((u) => u.role === "project_manager" || u.is_project_manager), [users]);
   // Only real, usable templates — active and with at least one step. A
   // template with zero steps can't back a real onboarding checklist, so it's
   // excluded from selection the same way the backend rejects it at create time.
@@ -74,7 +77,6 @@ export default function StartOnboardingModal({ isOpen, onClose, onCreated, locke
     setForm({
       ...initialForm,
       project_id: lockedProjectId ? String(lockedProjectId) : "",
-      project_manager_id: defaultProjectManagerId ? String(defaultProjectManagerId) : "",
     });
     setTemplateTouched(false);
     setFormError("");
@@ -92,7 +94,7 @@ export default function StartOnboardingModal({ isOpen, onClose, onCreated, locke
         setTemplates(templateData);
       })
       .finally(() => setIsLoadingOptions(false));
-  }, [isOpen, lockedProjectId, defaultProjectManagerId]);
+  }, [isOpen, lockedProjectId]);
 
   // Each org has exactly one active default template — preselect it as soon
   // as it loads, unless the user has already deliberately picked one.
@@ -135,7 +137,8 @@ export default function StartOnboardingModal({ isOpen, onClose, onCreated, locke
         const onboarding = await onboardingApi.create({
           client_user_id: Number(form.client_user_id),
           project_id: Number(form.project_id),
-          project_manager_id: form.project_manager_id ? Number(form.project_manager_id) : null,
+          // No project_manager_id — the backend derives it from the project's
+          // existing assignment (ProjectMembership) automatically.
           template_id: templateId,
           due_date: form.due_date || null,
         });
@@ -149,7 +152,8 @@ export default function StartOnboardingModal({ isOpen, onClose, onCreated, locke
           company_name: form.company_name.trim() || null,
           phone_number: form.phone_number.trim() || null,
           project_id: Number(form.project_id),
-          project_manager_id: form.project_manager_id ? Number(form.project_manager_id) : null,
+          // No project_manager_id — the backend derives it from the project's
+          // existing assignment (ProjectMembership) automatically.
           onboarding_template_id: templateId,
           due_date: form.due_date || null,
           message: form.message.trim() || null,
@@ -275,39 +279,27 @@ export default function StartOnboardingModal({ isOpen, onClose, onCreated, locke
             </Select>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Project Manager</label>
-              <Select value={form.project_manager_id} onChange={(e) => setForm({ ...form, project_manager_id: e.target.value })}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                <option value="">Unassigned</option>
-                {managers.map((m) => <option key={m.id} value={m.id}>{m.full_name || m.email}</option>)}
-              </Select>
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Template{defaultTemplate && !templateTouched ? " (default)" : ""}
-              </label>
-              <Select
-                value={form.template_id}
-                onChange={(e) => { setTemplateTouched(true); setForm({ ...form, template_id: e.target.value }); }}
-                disabled={hasNoUsableTemplate}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
-              >
-                <option value="">{hasNoUsableTemplate ? "No templates available" : "Select template"}</option>
-                {usableTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_default ? " (default)" : ""}</option>)}
-              </Select>
-              {hasNoUsableTemplate && (
-                <p className="mt-1 text-xs text-red-600">Create or configure an onboarding template first.</p>
-              )}
-            </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">
+              Template{defaultTemplate && !templateTouched ? " (default)" : ""}
+            </label>
+            <Select
+              value={form.template_id}
+              onChange={(e) => { setTemplateTouched(true); setForm({ ...form, template_id: e.target.value }); }}
+              disabled={hasNoUsableTemplate}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:bg-slate-50"
+            >
+              <option value="">{hasNoUsableTemplate ? "No templates available" : "Select template"}</option>
+              {usableTemplates.map((t) => <option key={t.id} value={t.id}>{t.name}{t.is_default ? " (default)" : ""}</option>)}
+            </Select>
+            {hasNoUsableTemplate && (
+              <p className="mt-1 text-xs text-red-600">Create or configure an onboarding template first.</p>
+            )}
           </div>
 
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Due date</label>
-            <input type="date" value={form.due_date} min={new Date().toISOString().slice(0, 10)}
-              onChange={(e) => setForm({ ...form, due_date: e.target.value })}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <DatePicker value={form.due_date} onChange={(e) => setForm({ ...form, due_date: e.target.value })} />
           </div>
 
           {!isExistingClient && (

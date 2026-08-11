@@ -74,6 +74,14 @@ function UsersIcon() {
   );
 }
 
+function MeetingsNavIcon() {
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M5.75 2a.75.75 0 01.75.75V4h7V2.75a.75.75 0 011.5 0V4h.25A2.75 2.75 0 0118 6.75v8.5A2.75 2.75 0 0115.25 18H4.75A2.75 2.75 0 012 15.25v-8.5A2.75 2.75 0 014.75 4H5V2.75A.75.75 0 015.75 2zm-1 5.5c0-.414.336-.75.75-.75h9a.75.75 0 010 1.5h-9A.75.75 0 014.75 7.5z" clipRule="evenodd" />
+    </svg>
+  );
+}
+
 function TeamsIcon() {
   return (
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -933,6 +941,14 @@ function SidebarContent({
               onClick={handleClickNav}
             />
           ) : null}
+
+          <NavItem
+            to="/meetings"
+            icon={<MeetingsNavIcon />}
+            label="Meetings"
+            collapsed={collapsed}
+            onClick={handleClickNav}
+          />
 
           <>
             <SectionTitle collapsed={collapsed}>Organization</SectionTitle>

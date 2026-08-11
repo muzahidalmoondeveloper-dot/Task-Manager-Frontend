@@ -17,6 +17,7 @@ import ReportEditPage from "../pages/ReportEditPage";
 import ReportPreviewPage from "../pages/ReportPreviewPage";
 import TasksPage from "../pages/TasksPage";
 import IssuesPage from "../pages/IssuesPage";
+import MeetingsPage from "../pages/MeetingsPage";
 import ClientOnboardingsPage from "../pages/ClientOnboardingsPage";
 import OnboardingDetailPage from "../pages/OnboardingDetailPage";
 import OnboardingTemplatesPage from "../pages/OnboardingTemplatesPage";
@@ -58,6 +59,7 @@ export default function AppRouter() {
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/users" element={<UsersPage />} />
             <Route path="/users/:userId/scoreboard" element={<UserScoreboardPage />} />
+            <Route path="/meetings" element={<MeetingsPage />} />
             <Route path="/scoreboard" element={<OrganizationScoreboardPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/teams/:teamId" element={<TeamDetailPage />} />
