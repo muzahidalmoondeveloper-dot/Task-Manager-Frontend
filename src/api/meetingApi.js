@@ -1,100 +1,121 @@
 import { apiClient } from "./client";
 
+// Meetings are not team-specific — every call is on the flat /meetings
+// resource. `teamId` is now just an optional field on the meeting itself
+// (and an optional filter here), never part of the URL.
 export const meetingApi = {
-  list(teamId, filter) {
-    const qs = filter ? `?filter=${filter}` : "";
-    return apiClient.get(`/teams/${teamId}/meetings${qs}`);
+  list(filter, teamId) {
+    const params = new URLSearchParams();
+    if (filter) params.set("filter", filter);
+    if (teamId) params.set("team_id", teamId);
+    const qs = params.toString();
+    return apiClient.get(`/meetings${qs ? `?${qs}` : ""}`);
   },
-  create(teamId, payload) {
-    return apiClient.post(`/teams/${teamId}/meetings`, payload);
+  create(payload) {
+    return apiClient.post(`/meetings`, payload);
   },
-  get(teamId, meetingId) {
-    return apiClient.get(`/teams/${teamId}/meetings/${meetingId}`);
+  get(meetingId) {
+    return apiClient.get(`/meetings/${meetingId}`);
   },
-  update(teamId, meetingId, payload) {
-    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}`, payload);
+  update(meetingId, payload) {
+    return apiClient.patch(`/meetings/${meetingId}`, payload);
   },
-  delete(teamId, meetingId) {
-    return apiClient.delete(`/teams/${teamId}/meetings/${meetingId}`);
+  delete(meetingId) {
+    return apiClient.delete(`/meetings/${meetingId}`);
   },
 
   // lifecycle
-  start(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/start`);
+  start(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/start`);
   },
-  pause(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/pause`);
+  pause(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/pause`);
   },
-  resume(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/resume`);
+  resume(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/resume`);
   },
-  end(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/end`);
-  },
-
-  setParticipantJoined(teamId, meetingId, userId, joined) {
-    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}/participants/${userId}`, { joined });
-  },
-  setParticipantScore(teamId, meetingId, userId, score, note) {
-    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}/participants/${userId}/score`, { score, note });
+  end(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/end`);
   },
 
-  checkinNext(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/next`);
+  setParticipantJoined(meetingId, userId, joined) {
+    return apiClient.patch(`/meetings/${meetingId}/participants/${userId}`, { joined });
   },
-  checkinSkip(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/skip`);
+  setParticipantScore(meetingId, userId, score, note) {
+    return apiClient.patch(`/meetings/${meetingId}/participants/${userId}/score`, { score, note });
   },
-  checkinSelect(teamId, meetingId, userId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/select`, { user_id: userId });
+
+  checkinNext(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/checkin/next`);
   },
-  checkinReset(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/checkin/reset`);
+  checkinSkip(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/checkin/skip`);
+  },
+  checkinSelect(meetingId, userId) {
+    return apiClient.post(`/meetings/${meetingId}/checkin/select`, { user_id: userId });
+  },
+  checkinReset(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/checkin/reset`);
   },
 
   // agenda
-  addAgendaItem(teamId, meetingId, payload) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/agenda`, payload);
+  addAgendaItem(meetingId, payload) {
+    return apiClient.post(`/meetings/${meetingId}/agenda`, payload);
   },
-  updateAgendaItem(teamId, meetingId, itemId, payload) {
-    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}/agenda/${itemId}`, payload);
+  updateAgendaItem(meetingId, itemId, payload) {
+    return apiClient.patch(`/meetings/${meetingId}/agenda/${itemId}`, payload);
   },
-  deleteAgendaItem(teamId, meetingId, itemId) {
-    return apiClient.delete(`/teams/${teamId}/meetings/${meetingId}/agenda/${itemId}`);
+  deleteAgendaItem(meetingId, itemId) {
+    return apiClient.delete(`/meetings/${meetingId}/agenda/${itemId}`);
   },
-  reorderAgenda(teamId, meetingId, items) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/agenda/reorder`, items);
+  reorderAgenda(meetingId, items) {
+    return apiClient.post(`/meetings/${meetingId}/agenda/reorder`, items);
   },
-  advanceAgenda(teamId, meetingId) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/agenda/next`);
+  advanceAgenda(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/agenda/next`);
   },
 
   // notes
-  addNote(teamId, meetingId, payload) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/notes`, payload);
+  addNote(meetingId, payload) {
+    return apiClient.post(`/meetings/${meetingId}/notes`, payload);
   },
-  updateNote(teamId, meetingId, noteId, payload) {
-    return apiClient.patch(`/teams/${teamId}/meetings/${meetingId}/notes/${noteId}`, payload);
+  updateNote(meetingId, noteId, payload) {
+    return apiClient.patch(`/meetings/${meetingId}/notes/${noteId}`, payload);
   },
-  deleteNote(teamId, meetingId, noteId) {
-    return apiClient.delete(`/teams/${teamId}/meetings/${meetingId}/notes/${noteId}`);
+  deleteNote(meetingId, noteId) {
+    return apiClient.delete(`/meetings/${meetingId}/notes/${noteId}`);
   },
 
   // decisions
-  addDecision(teamId, meetingId, payload) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/decisions`, payload);
+  addDecision(meetingId, payload) {
+    return apiClient.post(`/meetings/${meetingId}/decisions`, payload);
   },
-  deleteDecision(teamId, meetingId, decisionId) {
-    return apiClient.delete(`/teams/${teamId}/meetings/${meetingId}/decisions/${decisionId}`);
+  deleteDecision(meetingId, decisionId) {
+    return apiClient.delete(`/meetings/${meetingId}/decisions/${decisionId}`);
   },
 
   // tasks
-  createTask(teamId, meetingId, payload) {
-    return apiClient.post(`/teams/${teamId}/meetings/${meetingId}/tasks`, payload);
+  createTask(meetingId, payload) {
+    return apiClient.post(`/meetings/${meetingId}/tasks`, payload);
+  },
+  // Links an EXISTING task (vs createTask, which makes a new one) —
+  // used by the suggested-tasks "add to agenda" flow.
+  linkTask(meetingId, taskId, agendaItemId) {
+    return apiClient.post(`/meetings/${meetingId}/tasks/link`, { task_id: taskId, agenda_item_id: agendaItemId ?? null });
   },
 
   // summary
-  summary(teamId, meetingId) {
-    return apiClient.get(`/teams/${teamId}/meetings/${meetingId}/summary`);
+  summary(meetingId) {
+    return apiClient.get(`/meetings/${meetingId}/summary`);
+  },
+
+  // Linked Task Integration (plan section 7) — overdue/high-priority tasks
+  // and unresolved issues, optionally narrowed to a team and/or project.
+  suggestedTasks(teamId, projectId) {
+    const params = new URLSearchParams();
+    if (teamId) params.set("team_id", teamId);
+    if (projectId) params.set("project_id", projectId);
+    const qs = params.toString();
+    return apiClient.get(`/meetings/suggested-tasks${qs ? `?${qs}` : ""}`);
   },
 };

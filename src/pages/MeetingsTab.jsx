@@ -2,19 +2,14 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Select from "../components/Select";
 import toast from "react-hot-toast";
 import { meetingApi } from "../api/meetingApi";
+import { userApi } from "../api/userApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
+import CreateMeetingModal from "../components/meetings/CreateMeetingModal";
+import { Avatar } from "../components/meetings/meetingHelpers";
+import { MEETING_TYPES, AVATAR_COLORS, fmtDateTime, fmtDuration, getInitials } from "../components/meetings/meetingConstants";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const MEETING_TYPES = [
-  { value: "weekly", label: "Weekly Sync" },
-  { value: "l10", label: "L10" },
-  { value: "quarterly", label: "Quarterly Review" },
-  { value: "annual", label: "Annual Planning" },
-  { value: "one_on_one", label: "1-on-1" },
-  { value: "custom", label: "Custom" },
-];
 
 const STATUS_CONFIG = {
   scheduled: { label: "Scheduled", cls: "bg-sky-100 text-sky-700" },
@@ -25,43 +20,6 @@ const STATUS_CONFIG = {
 
 const PRIORITY_LABELS = ["None", "Low", "Medium", "High", "Urgent"];
 const PRIORITY_VALUES = ["none", "low", "medium", "high", "urgent"];
-
-function fmtDateTime(iso) {
-  if (!iso) return "";
-  return new Date(iso).toLocaleString("en-US", {
-    month: "short", day: "numeric", year: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
-}
-
-function fmtDuration(mins) {
-  if (!mins) return "";
-  const h = Math.floor(mins / 60);
-  const m = mins % 60;
-  if (h && m) return `${h}h ${m}m`;
-  if (h) return `${h}h`;
-  return `${m}m`;
-}
-
-function getInitials(name) {
-  if (!name) return "?";
-  const p = name.trim().split(/\s+/);
-  return p.length === 1 ? p[0][0].toUpperCase() : (p[0][0] + p[p.length - 1][0]).toUpperCase();
-}
-
-const AVATAR_COLORS = [
-  "bg-indigo-500", "bg-violet-500", "bg-emerald-500", "bg-sky-500",
-  "bg-amber-500", "bg-rose-500", "bg-teal-500", "bg-fuchsia-500",
-];
-
-function Avatar({ name, size = "h-7 w-7" }) {
-  const idx = name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0;
-  return (
-    <span className={`inline-flex items-center justify-center rounded-full text-xs font-semibold text-white ${size} ${AVATAR_COLORS[idx]}`}>
-      {getInitials(name)}
-    </span>
-  );
-}
 
 function AttendanceAvatar({ name, joined, onClick, disabled, title }) {
   const idx = name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0;
@@ -121,13 +79,6 @@ function SpeakingOrderAvatar({ name, state, onClick }) {
       <p className={`text-[11px] font-medium ${labelCls}`}>{label}</p>
     </div>
   );
-}
-
-function toLocalDatetimeValue(isoStr) {
-  if (!isoStr) return "";
-  const d = new Date(isoStr);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 // ─── Drag & Drop reorder for agenda ──────────────────────────────────────────
@@ -262,163 +213,6 @@ function AgendaItem({ item, canManage, isLive, isCurrent, onUpdate, onDelete, on
   );
 }
 
-// ─── Meeting Create/Edit Modal ────────────────────────────────────────────────
-
-function MeetingModal({ meeting, teamMembers, onSave, onClose }) {
-  const [title, setTitle] = useState(meeting?.title || "");
-  const [description, setDescription] = useState(meeting?.description || "");
-  const [scheduledAt, setScheduledAt] = useState(
-    meeting ? toLocalDatetimeValue(meeting.scheduled_at) : ""
-  );
-  const [durationMinutes, setDurationMinutes] = useState(String(meeting?.duration_minutes || 60));
-  const [meetingType, setMeetingType] = useState(meeting?.meeting_type || "custom");
-  const [participantIds, setParticipantIds] = useState(
-    meeting ? meeting.participants.map((p) => p.user_id).filter(Boolean) : []
-  );
-  const [saving, setSaving] = useState(false);
-
-  function toggleParticipant(uid) {
-    setParticipantIds((prev) =>
-      prev.includes(uid) ? prev.filter((id) => id !== uid) : [...prev, uid]
-    );
-  }
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    if (!title.trim() || !scheduledAt) {
-      toast.error("Title and date/time are required");
-      return;
-    }
-    setSaving(true);
-    try {
-      await onSave({
-        title: title.trim(),
-        description: description.trim() || null,
-        scheduled_at: new Date(scheduledAt).toISOString(),
-        duration_minutes: Number(durationMinutes) || 60,
-        meeting_type: meetingType,
-        participant_ids: participantIds,
-      });
-      onClose();
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-lg rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-900">{meeting ? "Edit Meeting" : "New Meeting"}</h2>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4 p-6">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Title *</label>
-            <input
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="Meeting title"
-              required
-              className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500">Date & Time *</label>
-              <input
-                type="datetime-local"
-                value={scheduledAt}
-                onChange={(e) => setScheduledAt(e.target.value)}
-                required
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-slate-500">Duration (min)</label>
-              <input
-                type="number"
-                value={durationMinutes}
-                onChange={(e) => setDurationMinutes(e.target.value)}
-                min="5"
-                className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Type</label>
-            <Select
-              value={meetingType}
-              onChange={(e) => setMeetingType(e.target.value)}
-              className="w-full px-3 py-2.5 text-sm focus:ring-2 focus:ring-teal-500"
-            >
-              {MEETING_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
-            </Select>
-          </div>
-
-          <div>
-            <label className="mb-1 block text-xs font-medium text-slate-500">Description</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              rows={2}
-              placeholder="Optional description"
-              className="w-full resize-none rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-
-          {teamMembers.length > 0 && (
-            <div>
-              <label className="mb-2 block text-xs font-medium text-slate-500">Participants</label>
-              <div className="flex flex-wrap gap-2">
-                {teamMembers.map((m) => {
-                  const selected = participantIds.includes(m.user?.id || m.id);
-                  const uid = m.user?.id || m.id;
-                  const name = m.user?.full_name || m.full_name || m.email || "?";
-                  return (
-                    <button
-                      key={uid}
-                      type="button"
-                      onClick={() => toggleParticipant(uid)}
-                      className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
-                        selected
-                          ? "border-teal-500 bg-teal-50 text-teal-700"
-                          : "border-slate-200 text-slate-600 hover:border-slate-300"
-                      }`}
-                    >
-                      <Avatar name={name} size="h-4 w-4" />
-                      {name}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="rounded-xl px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60"
-            >
-              {saving ? "Saving..." : meeting ? "Save Changes" : "Create Meeting"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
 
 // ─── Score Modal (Wrap Up) ────────────────────────────────────────────────────
 
@@ -506,7 +300,13 @@ function ScoreModal({ participant, onClose, onSubmit }) {
 
 // ─── Live Meeting Panel ───────────────────────────────────────────────────────
 
-function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
+// Exported (alongside MeetingCard/SummaryModal below) so the org-wide
+// MeetingsPage can reuse the exact same live-meeting experience — agenda,
+// notes, decisions, check-in roulette, join toggle — instead of duplicating
+// ~700 lines of it. Self-contained: only reads the `meeting` prop and its
+// own hooks/meetingApi calls, no dependency on MeetingsTab's own state.
+// Meetings aren't team-specific, so no team_id is needed here at all.
+export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
   const { user } = useAuth();
   const [elapsed, setElapsed] = useState(0);
   const [newAgendaTitle, setNewAgendaTitle] = useState("");
@@ -518,10 +318,20 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
   const [checkinFlashId, setCheckinFlashId] = useState(null);
   const [manualSpeakerId, setManualSpeakerId] = useState("");
   const [scoringFor, setScoringFor] = useState(null); // participant object whose score modal is open
+  const [orgUsers, setOrgUsers] = useState([]);
+  const [addParticipantId, setAddParticipantId] = useState("");
+  const [addingParticipant, setAddingParticipant] = useState(false);
   const autoSaveTimer = useRef(null);
   const savedNoteId = useRef(null);
   const checkinSpinningRef = useRef(false);
   useEffect(() => { checkinSpinningRef.current = checkinSpinning; }, [checkinSpinning]);
+
+  // Org-wide member list to add participants from — a meeting isn't
+  // team-specific, so this isn't limited to one team's roster.
+  useEffect(() => {
+    if (!canManage) return;
+    userApi.list().then(setOrgUsers).catch(() => {});
+  }, [canManage]);
 
   // Near-real-time sync: while this panel is open, poll for changes made by
   // anyone else viewing the same meeting (attendance, speaking order, agenda,
@@ -532,7 +342,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
     const id = setInterval(async () => {
       if (checkinSpinningRef.current) return; // don't clobber the shuffle animation mid-spin
       try {
-        const fresh = await meetingApi.get(teamId, meeting.id);
+        const fresh = await meetingApi.get(meeting.id);
         onUpdate(fresh);
       } catch {
         // transient poll failure — stay silent, next tick will retry
@@ -540,7 +350,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
     }, 4000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamId, meeting.id]);
+  }, [meeting.id]);
 
   // Timer
   useEffect(() => {
@@ -565,7 +375,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function lifecycle(action) {
     try {
-      const updated = await meetingApi[action](teamId, meeting.id);
+      const updated = await meetingApi[action](meeting.id);
       onUpdate(updated);
     } catch (err) {
       toast.error(err.message || "Action failed");
@@ -575,13 +385,48 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
   async function toggleJoined(participant) {
     const joined = !participant.joined_at;
     try {
-      const updated = await meetingApi.setParticipantJoined(teamId, meeting.id, participant.user_id, joined);
+      const updated = await meetingApi.setParticipantJoined(meeting.id, participant.user_id, joined);
       onUpdate({
         ...meeting,
         participants: meeting.participants.map((p) => (p.id === updated.id ? updated : p)),
       });
     } catch {
       toast.error("Failed to update attendance");
+    }
+  }
+
+  const availableToAdd = orgUsers.filter(
+    (u) => !meeting.participants.some((p) => p.user_id === u.id)
+  );
+
+  async function addParticipant() {
+    if (!addParticipantId) return;
+    setAddingParticipant(true);
+    try {
+      // No dedicated "add one participant" endpoint — update_meeting
+      // replaces the whole list, so send the existing ids plus the new one.
+      const nextIds = [...meeting.participants.map((p) => p.user_id).filter(Boolean), Number(addParticipantId)];
+      const updated = await meetingApi.update(meeting.id, { participant_ids: nextIds });
+      onUpdate(updated);
+      setAddParticipantId("");
+      toast.success("Participant added.");
+    } catch (err) {
+      toast.error(err.message || "Failed to add participant.");
+    } finally {
+      setAddingParticipant(false);
+    }
+  }
+
+  async function removeParticipant(participant) {
+    try {
+      const nextIds = meeting.participants
+        .filter((p) => p.id !== participant.id)
+        .map((p) => p.user_id)
+        .filter(Boolean);
+      const updated = await meetingApi.update(meeting.id, { participant_ids: nextIds });
+      onUpdate(updated);
+    } catch (err) {
+      toast.error(err.message || "Failed to remove participant.");
     }
   }
 
@@ -615,17 +460,17 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
   }
 
   function advanceCheckin() {
-    return runSpin(() => meetingApi.checkinNext(teamId, meeting.id));
+    return runSpin(() => meetingApi.checkinNext(meeting.id));
   }
 
   function skipCheckin() {
-    return runSpin(() => meetingApi.checkinSkip(teamId, meeting.id));
+    return runSpin(() => meetingApi.checkinSkip(meeting.id));
   }
 
   async function selectSpeaker() {
     if (!manualSpeakerId) return;
     try {
-      const updated = await meetingApi.checkinSelect(teamId, meeting.id, Number(manualSpeakerId));
+      const updated = await meetingApi.checkinSelect(meeting.id, Number(manualSpeakerId));
       onUpdate(updated);
       setManualSpeakerId("");
     } catch (err) {
@@ -635,7 +480,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function resetCheckin() {
     try {
-      const updated = await meetingApi.checkinReset(teamId, meeting.id);
+      const updated = await meetingApi.checkinReset(meeting.id);
       onUpdate(updated);
     } catch {
       toast.error("Failed to reset check-in.");
@@ -644,7 +489,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function advanceAgenda() {
     try {
-      const updated = await meetingApi.advanceAgenda(teamId, meeting.id);
+      const updated = await meetingApi.advanceAgenda(meeting.id);
       onUpdate(updated);
     } catch {
       toast.error("Failed to advance agenda.");
@@ -654,7 +499,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
   async function addAgendaItem() {
     if (!newAgendaTitle.trim()) return;
     try {
-      const updated = await meetingApi.addAgendaItem(teamId, meeting.id, {
+      const updated = await meetingApi.addAgendaItem(meeting.id, {
         title: newAgendaTitle.trim(),
         sort_order: meeting.agenda_items.length,
       });
@@ -667,7 +512,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function updateAgendaItem(itemId, payload) {
     try {
-      const updated = await meetingApi.updateAgendaItem(teamId, meeting.id, itemId, payload);
+      const updated = await meetingApi.updateAgendaItem(meeting.id, itemId, payload);
       onUpdate({
         ...meeting,
         agenda_items: meeting.agenda_items.map((a) => (a.id === itemId ? updated : a)),
@@ -679,7 +524,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function deleteAgendaItem(itemId) {
     try {
-      await meetingApi.deleteAgendaItem(teamId, meeting.id, itemId);
+      await meetingApi.deleteAgendaItem(meeting.id, itemId);
       onUpdate({ ...meeting, agenda_items: meeting.agenda_items.filter((a) => a.id !== itemId) });
     } catch {
       toast.error("Failed to delete item");
@@ -690,7 +535,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
     onUpdate({ ...meeting, agenda_items: newItems });
     try {
       await meetingApi.reorderAgenda(
-        teamId, meeting.id,
+        meeting.id,
         newItems.map((a) => ({ id: a.id, sort_order: a.sort_order }))
       );
     } catch {
@@ -706,9 +551,9 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
       if (!val.trim()) return;
       try {
         if (savedNoteId.current) {
-          await meetingApi.updateNote(teamId, meeting.id, savedNoteId.current, { content: val });
+          await meetingApi.updateNote(meeting.id, savedNoteId.current, { content: val });
         } else {
-          const note = await meetingApi.addNote(teamId, meeting.id, { content: val });
+          const note = await meetingApi.addNote(meeting.id, { content: val });
           savedNoteId.current = note.id;
           onUpdate({ ...meeting, notes: [...meeting.notes, note] });
         }
@@ -721,7 +566,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
   async function addDecision() {
     if (!decisionContent.trim()) return;
     try {
-      const d = await meetingApi.addDecision(teamId, meeting.id, { content: decisionContent.trim() });
+      const d = await meetingApi.addDecision(meeting.id, { content: decisionContent.trim() });
       onUpdate({ ...meeting, decisions: [...meeting.decisions, d] });
       setDecisionContent("");
     } catch {
@@ -731,7 +576,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function deleteDecision(did) {
     try {
-      await meetingApi.deleteDecision(teamId, meeting.id, did);
+      await meetingApi.deleteDecision(meeting.id, did);
       onUpdate({ ...meeting, decisions: meeting.decisions.filter((d) => d.id !== did) });
     } catch {
       toast.error("Failed to delete decision");
@@ -741,7 +586,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
   async function createTask() {
     if (!taskName.trim()) return;
     try {
-      const mt = await meetingApi.createTask(teamId, meeting.id, { name: taskName.trim() });
+      const mt = await meetingApi.createTask(meeting.id, { name: taskName.trim() });
       onUpdate({ ...meeting, meeting_tasks: [...meeting.meeting_tasks, mt] });
       setTaskName("");
       toast.success("Task created");
@@ -760,7 +605,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
   async function submitScore(userId, score, note) {
     try {
-      const updated = await meetingApi.setParticipantScore(teamId, meeting.id, userId, score, note || null);
+      const updated = await meetingApi.setParticipantScore(meeting.id, userId, score, note || null);
       onUpdate({
         ...meeting,
         participants: meeting.participants.map((p) => (p.id === updated.id ? updated : p)),
@@ -830,51 +675,84 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
           </div>
         </div>
 
-        {/* Stage 1: Attendance — shown while scheduled (always, for any meeting type) */}
-        {meeting.participants.length > 0 && (meeting.meeting_type !== "l10" || meeting.status === "scheduled") && (() => {
+        {/* Stage 1: Attendance — shown while scheduled (always, for any meeting type).
+            Renders even with zero participants (host still needs a way to add
+            the first one) whenever the host can manage it. */}
+        {(meeting.participants.length > 0 || canManage) && (meeting.meeting_type !== "l10" || meeting.status === "scheduled") && (() => {
           const joinedCount = meeting.participants.filter((p) => p.joined_at).length;
-          const pct = Math.round((joinedCount / meeting.participants.length) * 100);
+          const pct = meeting.participants.length ? Math.round((joinedCount / meeting.participants.length) * 100) : 0;
           return (
             <div className="border-b border-slate-200 px-6 py-4">
               <h3 className="text-sm font-semibold text-slate-900">Meeting Attendance</h3>
               <p className="mt-1 text-xs text-slate-500">
                 Click your own avatar to join.
-                {canManage && " As the host, click any attendee's avatar to check them in or remove them."}
+                {canManage && " As the host, click any attendee's avatar to check them in."}
               </p>
-              <div className="mt-3 flex items-center justify-between text-xs">
-                <span className="text-slate-500">
-                  {joinedCount} of {meeting.participants.length} team members joined
-                </span>
-                <span className="font-semibold text-slate-700">{pct}%</span>
-              </div>
-              <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
-                <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-              </div>
-              <div className="mt-3 flex flex-wrap gap-3">
+
+              {meeting.participants.length > 0 && (
+                <>
+                  <div className="mt-3 flex items-center justify-between text-xs">
+                    <span className="text-slate-500">
+                      {joinedCount} of {meeting.participants.length} participants joined
+                    </span>
+                    <span className="font-semibold text-slate-700">{pct}%</span>
+                  </div>
+                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
+                    <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
+                  </div>
+                </>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-4">
                 {meeting.participants.map((p) => {
                   const isSelf = p.user_id === user?.id;
                   const canClick = isSelf || canManage;
                   return (
-                    <AttendanceAvatar
-                      key={p.id}
-                      name={p.user?.full_name || p.user?.email}
-                      joined={Boolean(p.joined_at)}
-                      onClick={() => {
-                        if (!canClick) return;
-                        toggleJoined(p);
-                      }}
-                      disabled={!canClick}
-                      title={
-                        isSelf
-                          ? (p.joined_at ? "Click to leave the meeting." : "Click to join the meeting.")
-                          : canManage
-                          ? (p.joined_at ? `${p.user?.full_name || p.user?.email} — joined. Click to remove.` : `${p.user?.full_name || p.user?.email} — not joined. Click to check them in.`)
-                          : p.user?.full_name || p.user?.email
-                      }
-                    />
+                    <div key={p.id} className="flex flex-col items-center gap-1">
+                      <AttendanceAvatar
+                        name={p.user?.full_name || p.user?.email}
+                        joined={Boolean(p.joined_at)}
+                        onClick={() => {
+                          if (!canClick) return;
+                          toggleJoined(p);
+                        }}
+                        disabled={!canClick}
+                        title={
+                          isSelf
+                            ? (p.joined_at ? "Click to leave the meeting." : "Click to join the meeting.")
+                            : canManage
+                            ? (p.joined_at ? `${p.user?.full_name || p.user?.email} — joined. Click to check them out.` : `${p.user?.full_name || p.user?.email} — not joined. Click to check them in.`)
+                            : p.user?.full_name || p.user?.email
+                        }
+                      />
+                      {canManage && (
+                        <button type="button" onClick={() => removeParticipant(p)}
+                          className="text-[10px] font-medium text-slate-400 hover:text-red-500">
+                          Remove
+                        </button>
+                      )}
+                    </div>
                   );
                 })}
               </div>
+
+              {canManage && (
+                <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
+                  <Select value={addParticipantId} onChange={(e) => setAddParticipantId(e.target.value)}
+                    className="max-w-xs flex-1 px-3 py-2 text-sm">
+                    <option value="">
+                      {availableToAdd.length === 0 ? "No more org members to add" : "Add a participant…"}
+                    </option>
+                    {availableToAdd.map((u) => (
+                      <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                    ))}
+                  </Select>
+                  <button type="button" onClick={addParticipant} disabled={!addParticipantId || addingParticipant}
+                    className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+                    {addingParticipant ? "Adding…" : "+ Add"}
+                  </button>
+                </div>
+              )}
             </div>
           );
         })()}
@@ -1182,7 +1060,7 @@ function LiveMeetingPanel({ meeting, teamId, canManage, onUpdate, onClose }) {
 
 // ─── Meeting Card ─────────────────────────────────────────────────────────────
 
-function MeetingCard({ meeting, canManage, onOpen, onEdit, onDelete }) {
+export function MeetingCard({ meeting, canManage, onOpen, onEdit, onDelete }) {
   const cfg = STATUS_CONFIG[meeting.status] || STATUS_CONFIG.scheduled;
   const typeLabel = MEETING_TYPES.find((t) => t.value === meeting.meeting_type)?.label || meeting.meeting_type;
 
@@ -1193,6 +1071,12 @@ function MeetingCard({ meeting, canManage, onOpen, onEdit, onDelete }) {
           <div className="flex items-center gap-2 flex-wrap">
             <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${cfg.cls}`}>{cfg.label}</span>
             <span className="text-xs text-slate-400">{typeLabel}</span>
+            {/* Only present on the org-wide Meetings page (OrgMeetingOut) —
+                absent (undefined) within a single team's own Meetings tab,
+                where it'd be redundant. */}
+            {meeting.team_name && (
+              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{meeting.team_name}</span>
+            )}
           </div>
           <h3 className="mt-1.5 truncate text-sm font-semibold text-slate-900">{meeting.title}</h3>
           {meeting.description && (
@@ -1255,7 +1139,7 @@ function MeetingCard({ meeting, canManage, onOpen, onEdit, onDelete }) {
 
 // ─── Summary Modal ────────────────────────────────────────────────────────────
 
-function SummaryModal({ meeting, onClose }) {
+export function SummaryModal({ meeting, onClose }) {
   const completedAgenda = meeting.agenda_items.filter((a) => a.status === "done");
   const pendingAgenda = meeting.agenda_items.filter((a) => a.status !== "done");
 
@@ -1362,7 +1246,7 @@ export default function MeetingsTab({ team, canManage }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await meetingApi.list(team.id, filter || undefined);
+      const data = await meetingApi.list(filter || undefined, team.id);
       setMeetings(data);
     } catch {
       toast.error("Failed to load meetings");
@@ -1376,11 +1260,11 @@ export default function MeetingsTab({ team, canManage }) {
   async function handleSave(payload) {
     try {
       if (editing) {
-        const updated = await meetingApi.update(team.id, editing.id, payload);
+        const updated = await meetingApi.update(editing.id, payload);
         setMeetings((prev) => prev.map((m) => (m.id === editing.id ? updated : m)));
         toast.success("Meeting updated");
       } else {
-        const created = await meetingApi.create(team.id, payload);
+        const created = await meetingApi.create(payload);
         setMeetings((prev) => [created, ...prev]);
         toast.success("Meeting created");
       }
@@ -1393,7 +1277,7 @@ export default function MeetingsTab({ team, canManage }) {
   async function handleDelete(id) {
     if (!(await confirm({ message: "Delete this meeting?", tone: "danger", confirmLabel: "Delete" }))) return;
     try {
-      await meetingApi.delete(team.id, id);
+      await meetingApi.delete(id);
       setMeetings((prev) => prev.filter((m) => m.id !== id));
       toast.success("Deleted");
     } catch {
@@ -1506,7 +1390,8 @@ export default function MeetingsTab({ team, canManage }) {
 
       {/* Modals */}
       {showModal && (
-        <MeetingModal
+        <CreateMeetingModal
+          team={team}
           meeting={editing}
           teamMembers={teamMembers}
           onSave={handleSave}
@@ -1517,7 +1402,6 @@ export default function MeetingsTab({ team, canManage }) {
       {liveMeeting && (
         <LiveMeetingPanel
           meeting={liveMeeting}
-          teamId={team.id}
           canManage={canManage}
           onUpdate={handleUpdate}
           onClose={() => setLiveMeeting(null)}

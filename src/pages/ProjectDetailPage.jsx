@@ -159,8 +159,6 @@ export default function ProjectDetailPage() {
   const [isCreatingReport, setIsCreatingReport] = useState(false);
   const [reportForm, setReportForm] = useState({ report_type: "monthly", title: "", period_start: "", period_end: "" });
 
-  const [pmAssignments, setPmAssignments] = useState([]);
-
   const [clientInvitations, setClientInvitations] = useState([]);
   const [isLoadingClientInvitations, setIsLoadingClientInvitations] = useState(false);
   const [isInviteClientModalOpen, setIsInviteClientModalOpen] = useState(false);
@@ -428,21 +426,6 @@ export default function ProjectDetailPage() {
       toast.error(err.message || "Failed to delete report.");
     }
   }
-
-  async function loadPmAssignments() {
-    try {
-      const data = await projectApi.listMembers(projectId);
-      setPmAssignments(data);
-    } catch (err) {
-      toast.error(err.message || "Failed to load assigned project managers.");
-    }
-  }
-
-  useEffect(() => {
-    if (!canManageProjects) return;
-    loadPmAssignments();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, canManageProjects]);
 
 
   async function loadClientInvitations() {
@@ -2349,7 +2332,6 @@ export default function ProjectDetailPage() {
         onClose={() => setIsInviteClientModalOpen(false)}
         onCreated={loadClientInvitations}
         lockedProjectId={projectId}
-        defaultProjectManagerId={pmAssignments[0]?.user_id || null}
       />
 
       {convertingRequest ? (
