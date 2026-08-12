@@ -108,6 +108,7 @@ export default function ProjectsPage() {
         project.name,
         project.description,
         getStatusLabel(project.status),
+        project.project_manager_name,
         project.created_at,
         project.updated_at,
       ]
@@ -241,10 +242,7 @@ export default function ProjectsPage() {
       };
 
       if (isEditing) {
-        const updatedProject = await projectApi.update(
-          editingProjectId,
-          payload
-        );
+        await projectApi.update(editingProjectId, payload);
 
         if (formData.project_manager_id !== originalManagerId) {
           if (originalManagerId) {
@@ -255,9 +253,16 @@ export default function ProjectsPage() {
           }
         }
 
+        // Re-fetch rather than using the PATCH response directly — that
+        // response was taken BEFORE the member add/remove calls above, so
+        // it would still carry the old (or no) Project Manager and make
+        // the list's "Project Manager" column show stale data until a
+        // manual refresh.
+        const refreshedProject = await projectApi.getById(editingProjectId);
+
         setProjects((current) =>
           current.map((project) =>
-            project.id === editingProjectId ? updatedProject : project
+            project.id === editingProjectId ? refreshedProject : project
           )
         );
 
@@ -269,7 +274,11 @@ export default function ProjectsPage() {
           await projectApi.addMember(createdProject.id, Number(formData.project_manager_id));
         }
 
-        setProjects((current) => [createdProject, ...current]);
+        const finalProject = formData.project_manager_id
+          ? await projectApi.getById(createdProject.id)
+          : createdProject;
+
+        setProjects((current) => [finalProject, ...current]);
 
         toast.success("Project created successfully.");
       }
@@ -426,7 +435,7 @@ export default function ProjectsPage() {
       {!isLoading ? (
         <section className="overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm">
           <div className="overflow-x-auto xl:overflow-visible">
-            <table className="w-full min-w-[1000px] text-sm xl:min-w-0">
+            <table className="w-full min-w-[1150px] text-sm xl:min-w-0">
               <thead className="bg-slate-50">
                 <tr className="border-b border-slate-200">
                   <th className="min-w-72 px-4 py-3 text-left font-semibold text-slate-700">
@@ -435,6 +444,10 @@ export default function ProjectsPage() {
 
                   <th className="min-w-64 px-4 py-3 text-left font-semibold text-slate-700">
                     Description
+                  </th>
+
+                  <th className="min-w-44 px-4 py-3 text-left font-semibold text-slate-700">
+                    Project Manager
                   </th>
 
                   <th className="min-w-36 px-4 py-3 text-left font-semibold text-slate-700">
@@ -490,6 +503,19 @@ export default function ProjectsPage() {
                         <p className="line-clamp-2">
                           {project.description || "No description"}
                         </p>
+                      </td>
+
+                      <td className="px-4 py-4 align-middle text-slate-700">
+                        {project.project_manager_name ? (
+                          <span className="inline-flex items-center gap-2">
+                            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-slate-200 text-[10px] font-bold text-slate-700">
+                              {project.project_manager_name.charAt(0).toUpperCase()}
+                            </span>
+                            {project.project_manager_name}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">Unassigned</span>
+                        )}
                       </td>
 
                       <td className="px-4 py-4 align-middle">
@@ -549,7 +575,7 @@ export default function ProjectsPage() {
                 ) : (
                   <tr>
                     <td
-                      colSpan={canManageProjects ? 6 : 5}
+                      colSpan={canManageProjects ? 7 : 6}
                       className="px-4 py-8 text-center text-sm text-slate-500"
                     >
                       {hasActiveFilters
