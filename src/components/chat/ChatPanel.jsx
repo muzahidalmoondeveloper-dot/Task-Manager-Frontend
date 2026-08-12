@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import toast from "react-hot-toast";
 import { chatApi } from "../../api/chatApi";
 import { useAuth } from "../../context/AuthContext";
+import { usePageContext } from "../../context/PageContext";
 
 // ─── Accepted file types ──────────────────────────────────────────────────────
 const ACCEPTED_TYPES = ".pdf,.docx,.txt,.md,.csv,.json";
@@ -559,6 +560,7 @@ const voiceSupported =
 // session/message/action logic below is identical either way. ────────────────
 export default function ChatPanel({ variant = "floating", onClose, autoFocus = true }) {
   const { user } = useAuth();
+  const { pageContext } = usePageContext();
   const isTeamMember = user?.role === "team_member";
   const visibleSuggestions = QUICK_SUGGESTIONS.filter(
     (s) => !(isTeamMember && s === "Create a task for today")
@@ -767,7 +769,7 @@ export default function ChatPanel({ variant = "floating", onClose, autoFocus = t
         if (fileToSend) {
           response = await chatApi.uploadFile(fileToSend, trimmed, currentSessionId);
         } else {
-          response = await chatApi.sendMessage(trimmed, currentSessionId);
+          response = await chatApi.sendMessage(trimmed, currentSessionId, pageContext);
         }
 
         appendExchange(response, tempId);
