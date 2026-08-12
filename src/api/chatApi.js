@@ -3,8 +3,15 @@ import { apiClient, getAccessToken } from "./client";
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
 export const chatApi = {
-  sendMessage(message, sessionId = null) {
-    return apiClient.post("/chat/message", { message, session_id: sessionId });
+  sendMessage(message, sessionId = null, pageContext = null) {
+    // pageContext (architecture item 9 — validated UI/page context):
+    // { page_type: "task"|"project"|"team"|"rock"|"issue"|"meeting"|"client_request"|"other", entity_id }
+    // Lets deictic references ("mark this done") resolve to whatever record
+    // the user is actually looking at. Optional — omit or pass null when
+    // there's no specific record on screen (e.g. a list page).
+    const body = { message, session_id: sessionId };
+    if (pageContext) body.page_context = pageContext;
+    return apiClient.post("/chat/message", body);
   },
 
   async uploadFile(file, message = "", sessionId = null) {

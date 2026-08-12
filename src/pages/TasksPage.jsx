@@ -9,6 +9,7 @@ import { projectApi } from "../api/projectApi";
 import { teamApi } from "../api/teamApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm, usePrompt } from "../context/ConfirmContext";
+import { usePageContext } from "../context/PageContext";
 import CelebrationOverlay from "../components/CelebrationOverlay";
 import DatePicker from "../components/DatePicker";
 import { getDueRowClassName } from "../utils/taskDueStatus";
@@ -421,6 +422,12 @@ export default function TasksPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
   const prompt = usePrompt();
+  const { setPageContext, clearPageContext } = usePageContext();
+
+  // Belt-and-suspenders: if the user navigates away from this page entirely
+  // while a task's edit modal happened to be open, don't leave chat
+  // thinking that task is still "on screen" indefinitely.
+  useEffect(() => () => clearPageContext(), [clearPageContext]);
 
   const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
   const isTeamMember   = user?.role === "team_member";
@@ -668,11 +675,18 @@ export default function TasksPage() {
     resetForm();
     setOpenMenuId(null);
     setIsModalOpen(true);
+    // No specific task exists yet to be "this"/"it" — clear any stale
+    // context left over from a previously-edited task.
+    clearPageContext();
   }
 
   function closeModal() {
     resetForm();
     setIsModalOpen(false);
+    // Architecture item 9 — validated UI/page context: the chat widget must
+    // stop treating "this"/"it" as referring to a task the user is no
+    // longer looking at once its edit modal closes.
+    clearPageContext();
   }
 
   function handleEdit(task) {
@@ -690,6 +704,9 @@ export default function TasksPage() {
     });
     setFormError("");
     setIsModalOpen(true);
+    // Architecture item 9 — announce that the user is now looking at this
+    // specific task, so "mark this done" in chat resolves to it.
+    setPageContext("task", task.id);
   }
 
   async function handleSubmit(e) {

@@ -40,6 +40,27 @@ const INDUSTRY_OPTIONS = [
   "Other",
 ];
 
+// Architecture item 9 — timezone configurability (strict acceptance audit
+// gap #5). Prefer the browser's full, always-current IANA tz database via
+// Intl.supportedValuesOf (available in all evergreen browsers this app
+// targets) over hand-maintaining a list that inevitably drifts stale;
+// fall back to a small curated set only if that API is unavailable.
+const TIMEZONE_OPTIONS = (() => {
+  try {
+    if (typeof Intl.supportedValuesOf === "function") {
+      return Intl.supportedValuesOf("timeZone");
+    }
+  } catch {
+    // fall through to the static fallback below
+  }
+  return [
+    "UTC", "Asia/Dhaka", "Asia/Kolkata", "Asia/Dubai", "Asia/Karachi",
+    "Asia/Singapore", "Asia/Tokyo", "Asia/Shanghai", "Europe/London",
+    "Europe/Paris", "Europe/Berlin", "America/New_York", "America/Chicago",
+    "America/Denver", "America/Los_Angeles", "Australia/Sydney",
+  ];
+})();
+
 function getOrgInitials(name) {
   if (!name) return "?";
   const words = name.trim().split(/\s+/);
@@ -2146,7 +2167,7 @@ export default function OrganizationPage() {
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
   const [isEditOrgModalOpen, setIsEditOrgModalOpen] = useState(false);
-  const [orgEditForm, setOrgEditForm] = useState({ name: "", description: "", website: "", industry: "" });
+  const [orgEditForm, setOrgEditForm] = useState({ name: "", description: "", website: "", industry: "", timezone: "UTC" });
   const [isSavingOrg, setIsSavingOrg] = useState(false);
   const [orgEditError, setOrgEditError] = useState("");
 
@@ -2168,6 +2189,7 @@ export default function OrganizationPage() {
       description: org?.description || "",
       website: org?.website || "",
       industry: org?.industry || "",
+      timezone: org?.timezone || "UTC",
     });
     setOrgEditError("");
     setIsEditOrgModalOpen(true);
@@ -2188,6 +2210,7 @@ export default function OrganizationPage() {
         description: orgEditForm.description || null,
         website: orgEditForm.website || null,
         industry: orgEditForm.industry || null,
+        timezone: orgEditForm.timezone || "UTC",
       });
       setOrg(updated);
       window.dispatchEvent(new Event("org-updated"));
@@ -2406,6 +2429,22 @@ export default function OrganizationPage() {
                     <option key={opt} value={opt}>{opt}</option>
                   ))}
                 </Select>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Timezone</label>
+                <Select
+                  value={orgEditForm.timezone}
+                  onChange={(e) => setOrgEditForm((current) => ({ ...current, timezone: e.target.value }))}
+                  className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                >
+                  {TIMEZONE_OPTIONS.map((tz) => (
+                    <option key={tz} value={tz}>{tz.replace(/_/g, " ")}</option>
+                  ))}
+                </Select>
+                <p className="mt-1 text-xs text-slate-500">
+                  Used by the AI assistant to compute "today"/overdue/due-soon dates in your organization's own local time.
+                </p>
               </div>
 
               <div>
