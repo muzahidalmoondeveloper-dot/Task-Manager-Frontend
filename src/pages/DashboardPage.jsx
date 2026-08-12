@@ -684,7 +684,7 @@ export default function DashboardPage() {
         <>
           <div className={`grid gap-4 sm:grid-cols-2 ${isAdminView ? "xl:grid-cols-5" : isTeamMember ? "xl:grid-cols-3" : "xl:grid-cols-4"}`}>
             <StatCard
-              title="My Tasks"
+              title={isTeamMember ? "My Tasks" : isAdminView ? "All Tasks" : "Team Tasks"}
               value={taskSummary.total}
               description={
                 isTeamMember ? "Tasks assigned to you"

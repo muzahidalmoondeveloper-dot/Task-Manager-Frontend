@@ -1000,7 +1000,18 @@ export default function TeamDetailPage() {
   const [editingTodo, setEditingTodo] = useState(null);
   const [celebrationData, setCelebrationData] = useState(null);
 
-  const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+  // Full create/edit/delete access under a team belongs to: org
+  // Owner/Admin, or whoever is actually THIS team's assigned manager —
+  // checked via team.team_manager.id rather than the viewer's org-wide
+  // role/label, since a user can be a Project Manager whose org role
+  // string is "project_manager" yet still be the real manager of this
+  // specific team (granted via the Team Manager privilege flag). Relying
+  // on `user?.role === "team_manager"` alone missed that combination.
+  const canManageTasks =
+    user?.role === "owner" ||
+    user?.role === "admin" ||
+    user?.is_org_admin ||
+    team?.team_manager?.id === user?.id;
 
   const members = useMemo(() => {
     return team?.members || [];
