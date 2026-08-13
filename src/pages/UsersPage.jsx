@@ -15,9 +15,13 @@ const ROLE_OPTIONS = [
   { value: "team_manager", label: "Team Manager" },
   { value: "project_manager", label: "Project Manager" },
   { value: "team_member", label: "Team Member" },
+  { value: "client", label: "Client" },
 ];
 
-const ASSIGNABLE_ROLES = ROLE_OPTIONS.filter((r) => r.value !== "owner");
+// Clients are invited via Client Onboarding, not assigned a role from this
+// page's Edit User modal — kept out of the assignable set even though
+// they're now shown (and filterable) in the list itself.
+const ASSIGNABLE_ROLES = ROLE_OPTIONS.filter((r) => r.value !== "owner" && r.value !== "client");
 
 function formatRole(role) {
   return ROLE_OPTIONS.find((item) => item.value === role)?.label || role;
@@ -146,10 +150,10 @@ export default function UsersPage() {
       setIsLoading(true);
       setError("");
       const [userData, teamData] = await Promise.all([userApi.list(), teamApi.list()]);
-      // This page manages staff (owner/admin/team_manager/project_manager/
-      // team_member) — clients are invited and managed from Client
-      // Onboarding instead, and never have a scoreboard.
-      setUsers((userData || []).filter((u) => u.role !== "client"));
+      // Clients (invited from Client Onboarding) are shown here too, same
+      // as every other org member — they just don't have a scoreboard, so
+      // clicking one opens their request list instead (see navigate() below).
+      setUsers(userData || []);
       setTeams(teamData);
     } catch (err) {
       setError(err.message || "Unable to load users.");
@@ -469,7 +473,11 @@ export default function UsersPage() {
                                 <div className="min-w-0">
                                   <button
                                     type="button"
-                                    onClick={() => navigate(`/users/${item.id}/scoreboard`)}
+                                    onClick={() => navigate(
+                                      item.role === "client"
+                                        ? `/users/${item.id}/client-requests`
+                                        : `/users/${item.id}/scoreboard`
+                                    )}
                                     className="truncate font-semibold text-slate-900 hover:text-indigo-600 hover:underline"
                                   >
                                     {item.full_name}
@@ -543,13 +551,15 @@ export default function UsersPage() {
                                 </button>
                                 {openActionMenuId === item.id && (
                                   <div className="absolute right-4 top-12 z-20 w-36 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-lg">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEdit(item)}
-                                      className="block w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
-                                    >
-                                      Edit
-                                    </button>
+                                    {item.role !== "client" && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEdit(item)}
+                                        className="block w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
+                                      >
+                                        Edit
+                                      </button>
+                                    )}
                                     {user?.id !== item.id && (
                                       <button
                                         type="button"
