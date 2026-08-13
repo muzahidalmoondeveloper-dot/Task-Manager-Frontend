@@ -16,4 +16,8 @@ export const taskRequestApi = {
   reject(projectId, requestId, payload = {}) {
     return apiClient.post(`/projects/${projectId}/task-requests/${requestId}/reject`, payload);
   },
+
+  listForClient(userId) {
+    return apiClient.get(`/users/${userId}/task-requests`);
+  },
 };
