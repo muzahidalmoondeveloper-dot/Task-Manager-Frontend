@@ -1270,7 +1270,8 @@ function OrgChartTab({ canManage }) {
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[760px] text-sm">
             <thead>
               <tr className="border-b border-slate-100 bg-slate-50">
                 <th className="px-5 py-3 text-left text-xs font-semibold text-slate-500">Role name</th>
@@ -1323,6 +1324,7 @@ function OrgChartTab({ canManage }) {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 

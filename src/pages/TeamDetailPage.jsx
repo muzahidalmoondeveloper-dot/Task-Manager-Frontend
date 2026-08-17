@@ -23,7 +23,6 @@ import { useConfirm } from "../context/ConfirmContext";
 import RocksTab from "./RocksTab";
 import KPIsTab from "./KPIsTab";
 import IssuesTab from "./IssuesTab";
-import MeetingsTab from "./MeetingsTab";
 import TeamScoreboardTab from "./TeamScoreboardTab";
 import MyTeamScoreboardTab from "./MyTeamScoreboardTab";
 import RichEditor from "../components/RichEditor";
@@ -104,7 +103,7 @@ function linkKey(link) {
   return `${link.linked_type}:${link.linked_id}`;
 }
 
-function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, saving }) {
+export function NewsModal({ team, teams, users, currentUser, editing, onClose, onSave, saving }) {
   const [title, setTitle] = useState(editing?.title || "");
   const [icon, setIcon] = useState(editing?.icon || null);
   const [body, setBody] = useState(editing?.body || "");
@@ -829,11 +828,10 @@ const TEAM_PAGE_TABS = [
   { id: "kpis",       label: "KPIs"       },
   { id: "todos",      label: "To-Dos"     },
   { id: "issues",     label: "Issues"     },
-  { id: "meetings",   label: "Meetings"   },
   { id: "scoreboard", label: "Scoreboard" },
 ];
 
-function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
+export function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
   const [name, setName] = useState(editing?.name || "");
   const [icon, setIcon] = useState(editing?.icon || null);
   const [assigneeId, setAssigneeId] = useState(
@@ -1503,10 +1501,6 @@ export default function TeamDetailPage() {
 
       {activeTab === "issues" && (
         <IssuesTab team={team} canManage={canManageTasks} />
-      )}
-
-      {activeTab === "meetings" && (
-        <MeetingsTab team={team} canManage={canManageTasks} />
       )}
 
       {activeTab === "scoreboard" && (

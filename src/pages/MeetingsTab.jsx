@@ -3,11 +3,64 @@ import Select from "../components/Select";
 import toast from "react-hot-toast";
 import { meetingApi } from "../api/meetingApi";
 import { userApi } from "../api/userApi";
+import { issueApi } from "../api/issueApi";
+import { teamNewsApi } from "../api/teamNewsApi";
+import { teamApi } from "../api/teamApi";
+import { taskApi } from "../api/taskApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
 import CreateMeetingModal from "../components/meetings/CreateMeetingModal";
-import { Avatar } from "../components/meetings/meetingHelpers";
-import { MEETING_TYPES, AVATAR_COLORS, fmtDateTime, fmtDuration, getInitials } from "../components/meetings/meetingConstants";
+import { CreateTodoModal, NewsModal } from "./TeamDetailPage";
+import { IssueModal } from "./IssuesTab";
+import { Avatar, AgendaSectionIcon, FloatingReaction, AvatarReactionBadge } from "../components/meetings/meetingHelpers";
+import { KpiSection, RockReviewSection, NewsSection, TodoListSection, IdsSection, ConcludeSection } from "../components/meetings/liveSections";
+import { MEETING_TYPES, AVATAR_COLORS, fmtDateTime, fmtDuration, getInitials, randomReactionOffset } from "../components/meetings/meetingConstants";
+
+// Agenda items only carry a free-text title (no stored "key") — this maps
+// a Level 10-preset title back to its icon/description so the live view
+// looks right whether the meeting came from a preset or was hand-built.
+// Unrecognized titles (fully custom sections) fall back to a generic icon
+// and no description, same as the mockup implies for a "Custom Agenda".
+const SECTION_INFO = [
+  { key: "segue", match: /segue|check-?in/i, description: "Share the good news, break the ice, and transition into the meeting." },
+  { key: "scorecard", match: /scorecard|prior quarter|^kpi$/i, description: "Review your weekly measurables — numbers on or off track." },
+  { key: "rock_review", match: /rock/i, description: "Review progress on this quarter's Rocks — on track or off track." },
+  { key: "news", match: /headline|news|v\/?to/i, description: "Share customer and employee news — good or bad, worth knowing." },
+  { key: "todo_list", match: /to-?do/i, description: "Review to-dos from last week — done or not done." },
+  { key: "ids", match: /^ids$/i, description: "Identify, Discuss, and Solve your team's most important issues." },
+  { key: "swot", match: /swot/i, description: "Assess strengths, weaknesses, opportunities, and threats." },
+  { key: "feedback", match: /feedback/i, description: "Share positive and constructive feedback." },
+  { key: "conclude", match: /conclude|next steps|wrap/i, description: "Recap to-dos, cascading messages, and rate the meeting." },
+];
+
+function sectionInfoForTitle(title) {
+  return SECTION_INFO.find((s) => s.match.test(title || "")) || { key: null, description: null };
+}
+
+const REACTION_EMOJIS = ["👍", "👏", "❤️", "😊"];
+
+function fmtElapsed(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const pad = (n) => String(n).padStart(2, "0");
+  return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+// Ticks up from 0 while `active`, formatted mm:ss — used for the sidebar's
+// current-agenda-item countdown. Mounted with `key={agenda_item_id}` by the
+// caller so switching items resets it by remounting rather than via an
+// explicit "reset" effect (agenda items have no "started_at" of their own
+// to derive this from — it's a live-view-only display, not persisted).
+function ItemTimer({ active }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setSecs((s) => s + 1), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+  return fmtElapsed(secs);
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -20,26 +73,6 @@ const STATUS_CONFIG = {
 
 const PRIORITY_LABELS = ["None", "Low", "Medium", "High", "Urgent"];
 const PRIORITY_VALUES = ["none", "low", "medium", "high", "urgent"];
-
-function AttendanceAvatar({ name, joined, onClick, disabled, title }) {
-  const idx = name ? name.charCodeAt(0) % AVATAR_COLORS.length : 0;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      disabled={disabled}
-      className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-opacity ${disabled ? "cursor-default" : "hover:opacity-90"}`}
-    >
-      <span className={`flex h-11 w-11 items-center justify-center rounded-full text-white ${joined ? AVATAR_COLORS[idx] : "bg-slate-300"}`}>
-        {getInitials(name)}
-      </span>
-      {joined && (
-        <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-white bg-emerald-500" />
-      )}
-    </button>
-  );
-}
 
 function SpeakingOrderAvatar({ name, state, onClick }) {
   // state: "current" | "flashing" | "done" | "skipped" | "waiting"
@@ -81,222 +114,6 @@ function SpeakingOrderAvatar({ name, state, onClick }) {
   );
 }
 
-// ─── Drag & Drop reorder for agenda ──────────────────────────────────────────
-
-function AgendaList({ items, onUpdate, onDelete, onReorder, canManage, liveMeetingId, currentItemId }) {
-  const dragItem = useRef(null);
-  const dragOver = useRef(null);
-
-  function handleDragStart(idx) { dragItem.current = idx; }
-  function handleDragEnter(idx) { dragOver.current = idx; }
-
-  function handleDrop() {
-    const from = dragItem.current;
-    const to = dragOver.current;
-    if (from === null || to === null || from === to) return;
-    const reordered = [...items];
-    const [moved] = reordered.splice(from, 1);
-    reordered.splice(to, 0, moved);
-    const withOrder = reordered.map((item, i) => ({ ...item, sort_order: i }));
-    onReorder(withOrder);
-    dragItem.current = null;
-    dragOver.current = null;
-  }
-
-  return (
-    <div className="space-y-2">
-      {items.map((item, idx) => (
-        <AgendaItem
-          key={item.id}
-          item={item}
-          idx={idx}
-          canManage={canManage}
-          isLive={liveMeetingId != null}
-          isCurrent={item.id === currentItemId}
-          onUpdate={onUpdate}
-          onDelete={onDelete}
-          onDragStart={() => handleDragStart(idx)}
-          onDragEnter={() => handleDragEnter(idx)}
-          onDrop={handleDrop}
-        />
-      ))}
-    </div>
-  );
-}
-
-function AgendaItem({ item, canManage, isLive, isCurrent, onUpdate, onDelete, onDragStart, onDragEnter, onDrop }) {
-  const [editing, setEditing] = useState(false);
-  const [title, setTitle] = useState(item.title);
-  const [dur, setDur] = useState(String(item.duration_minutes || ""));
-
-  const STATUS_CYCLE = { pending: "in_progress", in_progress: "done", done: "pending" };
-  const STATUS_CLS = {
-    pending: "bg-slate-100 text-slate-600",
-    in_progress: "bg-sky-100 text-sky-700",
-    done: "bg-emerald-100 text-emerald-700",
-  };
-
-  function save() {
-    onUpdate(item.id, { title, duration_minutes: dur ? Number(dur) : null });
-    setEditing(false);
-  }
-
-  return (
-    <div
-      draggable={canManage}
-      onDragStart={onDragStart}
-      onDragEnter={onDragEnter}
-      onDrop={onDrop}
-      onDragOver={(e) => e.preventDefault()}
-      className={`flex items-center gap-2 rounded-xl border bg-white px-3 py-2 shadow-sm ${
-        isCurrent ? "border-teal-400 ring-1 ring-teal-200" : "border-slate-200"
-      }`}
-    >
-      {isCurrent && (
-        <span className="shrink-0 rounded-full bg-teal-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-teal-700">
-          Current
-        </span>
-      )}
-      {canManage && (
-        <svg className="h-4 w-4 shrink-0 cursor-grab text-slate-300" viewBox="0 0 20 20" fill="currentColor">
-          <path d="M7 2a2 2 0 110 4 2 2 0 010-4zm6 0a2 2 0 110 4 2 2 0 010-4zM7 8a2 2 0 110 4 2 2 0 010-4zm6 0a2 2 0 110 4 2 2 0 010-4zm-6 6a2 2 0 110 4 2 2 0 010-4zm6 0a2 2 0 110 4 2 2 0 010-4z" />
-        </svg>
-      )}
-
-      {editing ? (
-        <>
-          <input
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            className="flex-1 rounded-lg border border-slate-200 px-2 py-1 text-sm"
-            autoFocus
-          />
-          <input
-            type="number"
-            value={dur}
-            onChange={(e) => setDur(e.target.value)}
-            placeholder="min"
-            className="w-16 rounded-lg border border-slate-200 px-2 py-1 text-sm"
-          />
-          <button onClick={save} className="rounded-lg bg-teal-600 px-3 py-1 text-xs text-white hover:bg-teal-700">Save</button>
-          <button onClick={() => setEditing(false)} className="rounded-lg px-3 py-1 text-xs text-slate-500 hover:bg-slate-100">Cancel</button>
-        </>
-      ) : (
-        <>
-          <span className="flex-1 text-sm text-slate-800">{item.title}</span>
-          {item.duration_minutes && (
-            <span className="text-xs text-slate-400">{fmtDuration(item.duration_minutes)}</span>
-          )}
-          <button
-            onClick={() => onUpdate(item.id, { status: STATUS_CYCLE[item.status] || "pending" })}
-            className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLS[item.status] || STATUS_CLS.pending}`}
-          >
-            {item.status === "in_progress" ? "In Progress" : item.status === "done" ? "Done" : "Pending"}
-          </button>
-          {canManage && (
-            <>
-              <button onClick={() => setEditing(true)} className="text-slate-400 hover:text-slate-600">
-                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path d="M13.586 3.586a2 2 0 112.828 2.828l-.793.793-2.828-2.828.793-.793zM11.379 5.793L3 14.172V17h2.828l8.38-8.379-2.83-2.828z" />
-                </svg>
-              </button>
-              <button onClick={() => onDelete(item.id)} className="text-slate-400 hover:text-red-500">
-                <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zm-1 7a1 1 0 012 0v4a1 1 0 11-2 0V9zm4 0a1 1 0 012 0v4a1 1 0 11-2 0V9z" clipRule="evenodd" />
-                </svg>
-              </button>
-            </>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-
-// ─── Score Modal (Wrap Up) ────────────────────────────────────────────────────
-
-function ScoreModal({ participant, onClose, onSubmit }) {
-  const [score, setScore] = useState(participant.score != null ? String(participant.score) : "");
-  const [note, setNote] = useState(participant.score_note || "");
-  const [saving, setSaving] = useState(false);
-  const numericScore = Number(score);
-  const isValid = score !== "" && !Number.isNaN(numericScore) && numericScore >= 1 && numericScore <= 10;
-
-  async function handleSubmit() {
-    if (!isValid) {
-      toast.error("Enter a score between 1 and 10.");
-      return;
-    }
-    setSaving(true);
-    await onSubmit(Math.round(numericScore * 10) / 10, note.trim());
-    setSaving(false);
-  }
-
-  return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-          <h3 className="text-base font-semibold text-slate-900">Rate this meeting</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-            </svg>
-          </button>
-        </div>
-        <div className="p-5">
-          <p className="mb-3 text-sm text-slate-600">
-            Submit a score for {participant.user?.full_name || participant.user?.email}.
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => (
-              <button
-                key={n}
-                type="button"
-                onClick={() => setScore(String(n))}
-                className={`flex h-9 w-9 items-center justify-center rounded-lg border text-sm font-medium transition-colors ${
-                  Number(score) === n
-                    ? "border-teal-600 bg-teal-600 text-white"
-                    : "border-slate-300 text-slate-700 hover:bg-slate-50"
-                }`}
-              >
-                {n}
-              </button>
-            ))}
-            <input
-              type="text"
-              inputMode="decimal"
-              value={score}
-              onChange={(e) => setScore(e.target.value)}
-              placeholder="7.8"
-              className="h-9 w-16 rounded-lg border border-slate-300 px-2 text-center text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-            />
-          </div>
-          <p className="mt-1.5 text-xs text-slate-400">Use up to one decimal place, for example 7.8.</p>
-
-          <label className="mb-1.5 mt-4 block text-sm font-medium text-slate-700">Motivation for that score (optional)</label>
-          <textarea
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            rows={3}
-            placeholder="Share quick feedback for the team…"
-            className="w-full resize-none rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-          />
-        </div>
-        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-4">
-          <button onClick={onClose} className="rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100">Cancel</button>
-          <button
-            onClick={handleSubmit}
-            disabled={saving || !isValid}
-            className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
-          >
-            {saving ? "Submitting…" : "Submit rating"}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ─── Live Meeting Panel ───────────────────────────────────────────────────────
 
@@ -310,21 +127,352 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
   const { user } = useAuth();
   const [elapsed, setElapsed] = useState(0);
   const [newAgendaTitle, setNewAgendaTitle] = useState("");
-  const [noteContent, setNoteContent] = useState("");
   const [decisionContent, setDecisionContent] = useState("");
   const [taskName, setTaskName] = useState("");
-  const [activeSection, setActiveSection] = useState("agenda");
   const [checkinSpinning, setCheckinSpinning] = useState(false);
   const [checkinFlashId, setCheckinFlashId] = useState(null);
   const [manualSpeakerId, setManualSpeakerId] = useState("");
-  const [scoringFor, setScoringFor] = useState(null); // participant object whose score modal is open
   const [orgUsers, setOrgUsers] = useState([]);
   const [addParticipantId, setAddParticipantId] = useState("");
   const [addingParticipant, setAddingParticipant] = useState(false);
-  const autoSaveTimer = useRef(null);
-  const savedNoteId = useRef(null);
   const checkinSpinningRef = useRef(false);
   useEffect(() => { checkinSpinningRef.current = checkinSpinning; }, [checkinSpinning]);
+
+  // ── Live-view UI state (sidebar, toolbar popovers, reactions) ──
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [previewItemId, setPreviewItemId] = useState(null);
+  const [floatingReactions, setFloatingReactions] = useState([]);
+  const nextReactionIdRef = useRef(0); // local DOM element ids, distinct from the server's reaction feed ids below
+  const lastReactionIdRef = useRef(0); // highest server reaction id already rendered — the poll's "since" cursor
+  const seenReactionIdsRef = useRef(new Set()); // server reaction ids already animated (own sends + poll results)
+  // Per-user avatar overlay reactions (the "who reacted" badge), keyed by
+  // user_id -> { key, emoji }. `key` is bumped on every new reaction from
+  // that user so AvatarReactionBadge remounts (and its animation restarts
+  // from scratch) even if that user reacts again before the previous badge
+  // finished fading — a plain emoji-string value wouldn't re-trigger a
+  // React re-render/remount for the same user reacting with the same emoji
+  // twice in a row.
+  const [avatarReactions, setAvatarReactions] = useState({});
+  const nextAvatarReactionKeyRef = useRef(0);
+  // Toolbar create flows — each reuses the exact same modal component the
+  // Team page uses (CreateTodoModal/IssueModal/NewsModal), rather than the
+  // old plain-text-input popovers, per the explicit "use the existing modal
+  // components" request. CreateTodoModal has no internal team picker (it
+  // bakes `team.id` straight into its own payload), so To-Do specifically
+  // needs a one-step team-pick before the modal can open; Issue/News already
+  // have their own <Select> team pickers inside the modal, so those open
+  // straight away, defaulting to the first accessible team.
+  const [todoTeamPickerOpen, setTodoTeamPickerOpen] = useState(false);
+  const [pickedTeamId, setPickedTeamId] = useState("");
+  const [todoModalTeam, setTodoModalTeam] = useState(null);
+  const [todoModalOpen, setTodoModalOpen] = useState(false);
+  const [issueModalOpen, setIssueModalOpen] = useState(false);
+  const [newsModalOpen, setNewsModalOpen] = useState(false);
+  const [todoSaving, setTodoSaving] = useState(false);
+  const [issueSaving, setIssueSaving] = useState(false);
+  const [newsSaving, setNewsSaving] = useState(false);
+  // Items created via the toolbar modals — kept here and passed down so
+  // TodoListSection/IdsSection/NewsSection can show them immediately
+  // without a page refresh, without needing to re-fetch or duplicate the
+  // aggregation logic those sections already own.
+  const [extraTeamTasks, setExtraTeamTasks] = useState([]);
+  const [extraIssues, setExtraIssues] = useState([]);
+  const [extraNews, setExtraNews] = useState([]);
+  const [defaultTeams, setDefaultTeams] = useState([]);
+
+  // ── Recording -> transcript -> AI task extraction ──
+  // Speech-to-text runs entirely in the browser (the Web Speech API) — no
+  // audio is ever uploaded, and no specific transcription/LLM vendor is
+  // hardcoded here. Once recording stops, the accumulated transcript text
+  // is sent to the backend, which hands it to the app's own configured LLM
+  // (whichever provider is set up — see AITaskExtractor) to pull out clear
+  // action items and create them as real meeting to-dos.
+  const [recordingModalOpen, setRecordingModalOpen] = useState(false);
+  const [isRecordingLocal, setIsRecordingLocal] = useState(false);
+  const [isPausedLocal, setIsPausedLocal] = useState(false);
+  const [stoppingRecording, setStoppingRecording] = useState(false);
+  const [lastRecordingResult, setLastRecordingResult] = useState(null);
+  // A short, live, single-line preview so it's obvious in real time whether
+  // the mic is actually being picked up — without this, the only feedback
+  // was an opaque "No speech was captured" after the fact, with no way to
+  // tell mid-recording whether anything was wrong.
+  const [listeningPreview, setListeningPreview] = useState("");
+  const recognitionRef = useRef(null);
+  // Mirror isRecordingLocal/isPausedLocal for use inside the recognition's
+  // own event handlers, which close over stale state otherwise.
+  const isRecordingRef = useRef(false);
+  const isPausedRef = useRef(false);
+  const transcriptRef = useRef(""); // accumulated final (non-interim) transcript text for this recording session
+  // The last non-routine recognition error (permission denied, no mic,
+  // recognition service unreachable, etc.) — surfaced in the "No speech was
+  // captured" message so the actual cause isn't a total mystery.
+  const lastErrorRef = useRef(null);
+
+  useEffect(() => () => { recognitionRef.current?.stop(); }, []);
+
+  const RECOGNITION_ERROR_MESSAGES = {
+    "not-allowed": "Microphone access was blocked. Check your browser's site permissions and allow the mic for this page.",
+    "service-not-allowed": "Microphone access was blocked. Check your browser's site permissions and allow the mic for this page.",
+    "audio-capture": "No microphone was found. Check that one is connected and not in use by another app.",
+    "network": "The speech recognition service couldn't be reached. This browser may not support it — try Chrome or Edge with an internet connection.",
+  };
+
+  function createRecognition() {
+    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const recognition = new Ctor();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+    recognition.onresult = (event) => {
+      let interim = "";
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) {
+          transcriptRef.current = `${transcriptRef.current} ${event.results[i][0].transcript}`.trim();
+        } else {
+          interim += event.results[i][0].transcript;
+        }
+      }
+      setListeningPreview((interim || transcriptRef.current).slice(-140));
+    };
+    recognition.onerror = (event) => {
+      if (event.error === "no-speech" || event.error === "aborted") return;
+      lastErrorRef.current = event.error;
+      toast.error(RECOGNITION_ERROR_MESSAGES[event.error] || `Transcription error: ${event.error}`);
+    };
+    // Speech recognition auto-stops after a stretch of silence — if the
+    // user still intends to be recording (and hasn't paused), restart it
+    // transparently rather than silently losing the rest of the transcript.
+    recognition.onend = () => {
+      if (isRecordingRef.current && !isPausedRef.current) {
+        try { recognition.start(); } catch { /* a start() call is already pending */ }
+      }
+    };
+    return recognition;
+  }
+
+  function beginRecording() {
+    const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Ctor) {
+      toast.error("Your browser doesn't support live transcription. Try Chrome or Edge.");
+      return;
+    }
+    meetingApi.startRecording(meeting.id).then(onUpdate).catch(() => {}); // best-effort — the "Recording" badge for other participants is a nice-to-have, not a blocker
+    lastErrorRef.current = null;
+    const recognition = createRecognition();
+    recognition.start();
+    recognitionRef.current = recognition;
+    isRecordingRef.current = true;
+    isPausedRef.current = false;
+    setIsRecordingLocal(true);
+    setIsPausedLocal(false);
+    setListeningPreview("");
+    setLastRecordingResult(null);
+    setRecordingModalOpen(false); // the Start Recording modal's only job was starting it — controls live in the toolbar from here on
+  }
+
+  function pauseRecording() {
+    isPausedRef.current = true;
+    recognitionRef.current?.stop();
+    setIsPausedLocal(true);
+  }
+
+  function resumeRecording() {
+    isPausedRef.current = false;
+    const recognition = createRecognition();
+    recognition.start();
+    recognitionRef.current = recognition;
+    setIsPausedLocal(false);
+  }
+
+  function resetRecordingState() {
+    isRecordingRef.current = false;
+    isPausedRef.current = false;
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    transcriptRef.current = "";
+    setIsRecordingLocal(false);
+    setIsPausedLocal(false);
+    setListeningPreview("");
+  }
+
+  // Discards the recording — no transcript is submitted, no AI extraction
+  // runs. Distinct from stopAndSaveRecording below.
+  async function cancelRecording() {
+    resetRecordingState();
+    try {
+      onUpdate(await meetingApi.cancelRecording(meeting.id));
+    } catch {
+      // non-fatal — the "Recording" badge clearing for other participants is best-effort
+    }
+    toast("Recording cancelled — nothing was saved.");
+  }
+
+  async function stopAndSaveRecording() {
+    const finalText = transcriptRef.current.trim();
+    resetRecordingState();
+
+    if (!finalText) {
+      const reason = lastErrorRef.current && RECOGNITION_ERROR_MESSAGES[lastErrorRef.current];
+      toast.error(reason || "No speech was captured — check that your microphone is unmuted and permitted for this site.");
+      try { await meetingApi.cancelRecording(meeting.id); } catch { /* best-effort badge clear */ }
+      return;
+    }
+
+    setStoppingRecording(true);
+    try {
+      const result = await meetingApi.stopRecording(meeting.id, finalText);
+      onUpdate(result.meeting);
+      setLastRecordingResult(result.tasks_created);
+      if (result.tasks_created.length > 0) {
+        toast.success(`${result.tasks_created.length} to-do${result.tasks_created.length > 1 ? "s" : ""} created from the transcript.`);
+      } else {
+        toast("No clear action items were found in the transcript.");
+      }
+    } catch (err) {
+      toast.error(err.message || "Failed to process the recording.");
+    } finally {
+      setStoppingRecording(false);
+    }
+  }
+
+  // Meetings are never linked to a team (see meeting.team_id — always
+  // null), but Issues and Team News still require one — the toolbar's
+  // "Add Issue"/"Add News" default to the first team the user can
+  // access, same simplification as the in-section News/IDS create forms.
+  useEffect(() => {
+    teamApi.list().then(setDefaultTeams).catch(() => setDefaultTeams([]));
+  }, []);
+
+  // Spawns the actual floating DOM element/animation — used both for the
+  // clicking user's own instant local feedback and for reactions arriving
+  // from other participants via the sync poll below. Each <FloatingReaction>
+  // removes itself (via removeFloatingReaction, passed as onDone) the
+  // instant its own Web-Animations-API animation actually finishes.
+  function spawnFloatingReaction(emoji) {
+    nextReactionIdRef.current += 1;
+    const id = `local-${nextReactionIdRef.current}`;
+    const { left, driftX, duration, peakScale, riseVh } = randomReactionOffset();
+    setFloatingReactions((prev) => [...prev, { id, emoji, left, driftX, duration, peakScale, riseVh }]);
+  }
+
+  function removeFloatingReaction(id) {
+    setFloatingReactions((prev) => prev.filter((r) => r.id !== id));
+  }
+
+  // Shows/refreshes the small emoji badge pinned to one participant's
+  // avatar (see AvatarReactionBadge). Bumping the key even for a repeat
+  // emoji from the same user forces a remount, so "if the same user
+  // reacts again, show the new emoji again" holds even mid-animation.
+  function showAvatarReaction(userId, emoji) {
+    if (userId == null) return;
+    nextAvatarReactionKeyRef.current += 1;
+    setAvatarReactions((prev) => ({ ...prev, [userId]: { key: nextAvatarReactionKeyRef.current, emoji } }));
+  }
+
+  function clearAvatarReaction(userId, key) {
+    setAvatarReactions((prev) => {
+      if (prev[userId]?.key !== key) return prev; // a newer reaction from this user has already replaced it — don't clear that one
+      const next = { ...prev };
+      delete next[userId];
+      return next;
+    });
+  }
+
+  // Clicking a reaction button: play it immediately for the clicker (no
+  // waiting on a round-trip), and broadcast it to every other participant
+  // currently viewing this meeting via the ephemeral Redis-backed reaction
+  // feed (app.core.meeting_reactions) — piggybacked on the same ~2s sync
+  // poll below rather than a new push channel, since this app has no
+  // WebSocket/SSE infra to plug into. `seenReactionIdsRef` records the
+  // server-assigned id once the POST resolves, so the poll doesn't
+  // re-animate the sender's own reaction a second time when it reads it
+  // back from the feed.
+  function fireReaction(emoji) {
+    spawnFloatingReaction(emoji);
+    showAvatarReaction(user?.id, emoji);
+    meetingApi.sendReaction(meeting.id, emoji)
+      .then((entry) => { seenReactionIdsRef.current.add(entry.id); lastReactionIdRef.current = Math.max(lastReactionIdRef.current, entry.id); })
+      .catch(() => {}); // best-effort broadcast — it already played locally either way
+  }
+
+  function openTodoFlow() {
+    if (defaultTeams.length === 0) {
+      toast.error("No team available to create a to-do under.");
+      return;
+    }
+    if (defaultTeams.length === 1) {
+      setTodoModalTeam(defaultTeams[0]);
+      setTodoModalOpen(true);
+      return;
+    }
+    setPickedTeamId(String(defaultTeams[0].id));
+    setTodoTeamPickerOpen(true);
+  }
+
+  function confirmTodoTeam() {
+    const team = defaultTeams.find((t) => String(t.id) === pickedTeamId);
+    if (!team) return;
+    setTodoModalTeam(team);
+    setTodoTeamPickerOpen(false);
+    setTodoModalOpen(true);
+  }
+
+  async function saveTodoFromMeeting(payload) {
+    setTodoSaving(true);
+    try {
+      const created = await taskApi.create(payload);
+      setExtraTeamTasks((prev) => [{ ...created, __teamName: todoModalTeam?.name }, ...prev]);
+      toast.success("To-Do created.");
+      setTodoModalOpen(false);
+      setTodoModalTeam(null);
+    } catch (err) {
+      toast.error(err.message || "Failed to create to-do.");
+    } finally {
+      setTodoSaving(false);
+    }
+  }
+
+  async function saveIssueFromMeeting(payload) {
+    const { team_id: targetTeamId, ...rest } = payload;
+    const teamId = targetTeamId || defaultTeams[0]?.id;
+    if (!teamId) {
+      toast.error("No team available to file this issue under.");
+      return;
+    }
+    setIssueSaving(true);
+    try {
+      const created = await issueApi.create(teamId, rest);
+      const teamName = defaultTeams.find((t) => t.id === teamId)?.name;
+      setExtraIssues((prev) => [{ ...created, __teamName: teamName }, ...prev]);
+      toast.success("Issue created.");
+      setIssueModalOpen(false);
+    } catch (err) {
+      toast.error(err.message || "Failed to add issue.");
+    } finally {
+      setIssueSaving(false);
+    }
+  }
+
+  async function saveNewsFromMeeting(payload) {
+    const { team_id: targetTeamId, ...rest } = payload;
+    const teamId = targetTeamId || defaultTeams[0]?.id;
+    if (!teamId) {
+      toast.error("No team available to post this news item under.");
+      return;
+    }
+    setNewsSaving(true);
+    try {
+      const created = await teamNewsApi.create(teamId, rest);
+      const teamName = defaultTeams.find((t) => t.id === teamId)?.name;
+      setExtraNews((prev) => [{ ...created, __teamName: teamName }, ...prev]);
+      toast.success("News posted.");
+      setNewsModalOpen(false);
+    } catch (err) {
+      toast.error(err.message || "Failed to post news.");
+    } finally {
+      setNewsSaving(false);
+    }
+  }
 
   // Org-wide member list to add participants from — a meeting isn't
   // team-specific, so this isn't limited to one team's roster.
@@ -336,8 +484,9 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
   // Near-real-time sync: while this panel is open, poll for changes made by
   // anyone else viewing the same meeting (attendance, speaking order, agenda,
   // notes, decisions), so updates don't require a manual page refresh. No
-  // websocket/SSE infra exists in this app; this mirrors the only existing
-  // real-time-ish pattern (the notifications poll in AppLayout.jsx).
+  // websocket/SSE infra exists in this app (the notifications poll in
+  // AppLayout.jsx is 15s — deliberately tighter here since "someone just
+  // joined" is the whole point of this screen and should show up fast).
   useEffect(() => {
     const id = setInterval(async () => {
       if (checkinSpinningRef.current) return; // don't clobber the shuffle animation mid-spin
@@ -347,10 +496,42 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
       } catch {
         // transient poll failure — stay silent, next tick will retry
       }
-    }, 4000);
+      try {
+        const newReactions = await meetingApi.listReactionsSince(meeting.id, lastReactionIdRef.current);
+        for (const entry of newReactions) {
+          lastReactionIdRef.current = Math.max(lastReactionIdRef.current, entry.id);
+          if (seenReactionIdsRef.current.has(entry.id)) continue; // already animated (this is the sender's own reaction coming back)
+          seenReactionIdsRef.current.add(entry.id);
+          spawnFloatingReaction(entry.emoji);
+          showAvatarReaction(entry.user_id, entry.emoji);
+        }
+      } catch {
+        // transient poll failure — stay silent, next tick will retry
+      }
+    }, 2000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meeting.id]);
+
+  // Auto-join: simply having this panel open counts as being present —
+  // don't require a separate explicit "Join Meeting" click on top of that,
+  // and never silently leave the current viewer out of the participant/
+  // attendee list. Runs once per distinct meeting (the ref guard resets
+  // whenever `meeting.id` changes, since this panel can be reused across
+  // meetings without unmounting — see MeetingsPage.jsx, which doesn't key
+  // it by meeting id).
+  const autoJoinAttemptedRef = useRef(null);
+  useEffect(() => {
+    if (!user?.id || autoJoinAttemptedRef.current === meeting.id) return;
+    autoJoinAttemptedRef.current = meeting.id;
+    const self = meeting.participants.find((p) => p.user_id === user.id);
+    if (!self) {
+      joinAsSelf();
+    } else if (!self.joined_at) {
+      toggleJoined(self);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [meeting.id, meeting.participants, user?.id]);
 
   // Timer
   useEffect(() => {
@@ -361,17 +542,6 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [meeting.status, meeting.started_at]);
-
-  function fmtElapsed(secs) {
-    const h = Math.floor(secs / 3600);
-    const m = Math.floor((secs % 3600) / 60);
-    const s = secs % 60;
-    const pad = (n) => String(n).padStart(2, "0");
-    return h ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
-  }
-
-  const totalDurSecs = meeting.duration_minutes * 60;
-  const progress = Math.min(100, (elapsed / totalDurSecs) * 100);
 
   async function lifecycle(action) {
     try {
@@ -398,6 +568,29 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
   const availableToAdd = orgUsers.filter(
     (u) => !meeting.participants.some((p) => p.user_id === u.id)
   );
+
+  // Self-service join for a viewer who wasn't on the original invite list —
+  // anyone who can open this meeting (via the org-wide Meetings page, not
+  // just people explicitly invited beforehand) should be able to join it,
+  // the same way joining a Zoom/Meet link works even if you weren't on the
+  // calendar invite. Adds the participant row and marks it joined in one
+  // action; previously the only way to appear in the meeting at all was to
+  // already be in the invite list, which silently excluded anyone else who
+  // showed up, including the host in some cases.
+  async function joinAsSelf() {
+    if (!user?.id) return;
+    try {
+      const nextIds = [...meeting.participants.map((p) => p.user_id).filter(Boolean), user.id];
+      const updated = await meetingApi.update(meeting.id, { participant_ids: nextIds });
+      const joined = await meetingApi.setParticipantJoined(updated.id, user.id, true);
+      onUpdate({
+        ...updated,
+        participants: updated.participants.map((p) => (p.id === joined.id ? joined : p)),
+      });
+    } catch (err) {
+      toast.error(err.message || "Failed to join meeting.");
+    }
+  }
 
   async function addParticipant() {
     if (!addParticipantId) return;
@@ -487,12 +680,46 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     }
   }
 
+  // Conclude section's "End Meeting" — "Clear meeting items" resets the
+  // speaking order/spoken_at flags so next week's meeting starts fresh
+  // (the same capability as the "Restart Round" button, just bundled into
+  // the end-of-meeting flow); "Send email summary" emails every attendee a
+  // recap of this meeting's decisions and action items.
+  async function concludeMeeting({ clearMeetingItems, sendEmailSummary }) {
+    if (clearMeetingItems) {
+      await resetCheckin();
+    }
+    if (sendEmailSummary) {
+      try {
+        await meetingApi.sendSummary(meeting.id);
+        toast.success("Email summary sending to attendees.");
+      } catch (err) {
+        toast.error(err.message || "Failed to send email summary.");
+      }
+    }
+    await lifecycle("end");
+  }
+
   async function advanceAgenda() {
     try {
       const updated = await meetingApi.advanceAgenda(meeting.id);
       onUpdate(updated);
     } catch {
       toast.error("Failed to advance agenda.");
+    }
+  }
+
+  // Clicking an agenda item in the sidebar jumps straight to it — pure
+  // navigation, unlike the sequential "Next" button (advanceAgenda above),
+  // which also marks the outgoing item done. Anyone can look around; only
+  // the host actually moves the shared pointer for everyone else.
+  async function selectAgendaItem(itemId) {
+    if (!canManage || itemId === meeting.current_agenda_item_id) return;
+    try {
+      const updated = await meetingApi.selectAgendaItem(meeting.id, itemId);
+      onUpdate(updated);
+    } catch {
+      toast.error("Failed to switch agenda item.");
     }
   }
 
@@ -510,18 +737,6 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     }
   }
 
-  async function updateAgendaItem(itemId, payload) {
-    try {
-      const updated = await meetingApi.updateAgendaItem(meeting.id, itemId, payload);
-      onUpdate({
-        ...meeting,
-        agenda_items: meeting.agenda_items.map((a) => (a.id === itemId ? updated : a)),
-      });
-    } catch {
-      toast.error("Failed to update item");
-    }
-  }
-
   async function deleteAgendaItem(itemId) {
     try {
       await meetingApi.deleteAgendaItem(meeting.id, itemId);
@@ -529,38 +744,6 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     } catch {
       toast.error("Failed to delete item");
     }
-  }
-
-  async function reorderAgenda(newItems) {
-    onUpdate({ ...meeting, agenda_items: newItems });
-    try {
-      await meetingApi.reorderAgenda(
-        meeting.id,
-        newItems.map((a) => ({ id: a.id, sort_order: a.sort_order }))
-      );
-    } catch {
-      toast.error("Failed to reorder");
-    }
-  }
-
-  // Debounced note auto-save
-  function handleNoteChange(val) {
-    setNoteContent(val);
-    if (autoSaveTimer.current) clearTimeout(autoSaveTimer.current);
-    autoSaveTimer.current = setTimeout(async () => {
-      if (!val.trim()) return;
-      try {
-        if (savedNoteId.current) {
-          await meetingApi.updateNote(meeting.id, savedNoteId.current, { content: val });
-        } else {
-          const note = await meetingApi.addNote(meeting.id, { content: val });
-          savedNoteId.current = note.id;
-          onUpdate({ ...meeting, notes: [...meeting.notes, note] });
-        }
-      } catch {
-        // silent
-      }
-    }, 1500);
   }
 
   async function addDecision() {
@@ -595,14 +778,6 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     }
   }
 
-  const sections = [
-    { id: "agenda", label: "Agenda" },
-    { id: "notes", label: "Notes" },
-    { id: "decisions", label: "Decisions" },
-    { id: "tasks", label: "Tasks" },
-    { id: "wrapup", label: "Wrap Up" },
-  ];
-
   async function submitScore(userId, score, note) {
     try {
       const updated = await meetingApi.setParticipantScore(meeting.id, userId, score, note || null);
@@ -610,450 +785,570 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
         ...meeting,
         participants: meeting.participants.map((p) => (p.id === updated.id ? updated : p)),
       });
-      setScoringFor(null);
     } catch (err) {
       toast.error(err.message || "Failed to submit score.");
     }
   }
 
+  const typeLabel = MEETING_TYPES.find((t) => t.value === meeting.meeting_type)?.label || meeting.meeting_type;
+  const currentItem = meeting.agenda_items.find((a) => a.id === meeting.current_agenda_item_id);
+  const currentInfo = currentItem ? sectionInfoForTitle(currentItem.title) : sectionInfoForTitle(null);
+  const joinedParticipants = meeting.participants.filter((p) => p.joined_at);
+  const selfParticipant = meeting.participants.find((p) => p.user_id === user?.id);
+  const allSpoken = checkinPool.length > 0 && checkinPool.every((p) => p.spoken_at);
+  const remainingCandidates = checkinPool.filter(
+    (p) => !p.spoken_at && p.id !== meeting.checkin_current_participant_id
+  );
+  const currentSpeaker = checkinPool.find((p) => p.id === meeting.checkin_current_participant_id);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch bg-black/50">
-      <div className="ml-auto flex h-full w-full max-w-2xl flex-col bg-white shadow-2xl">
-        {/* Header */}
-        <div className="flex items-start justify-between border-b border-slate-200 px-6 py-4">
-          <div>
-            <h2 className="text-lg font-semibold text-slate-900">{meeting.title}</h2>
-            <p className="text-sm text-slate-500">
-              {MEETING_TYPES.find((t) => t.value === meeting.meeting_type)?.label}
-              {" · "}
-              {fmtDuration(meeting.duration_minutes)}
-            </p>
-          </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600">
-            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+    <div className="fixed inset-0 z-50 flex bg-white">
+      {/* ── Sidebar ── */}
+      <div className={`flex shrink-0 flex-col border-r border-slate-200 bg-white transition-[width] ${sidebarCollapsed ? "w-16" : "w-72"}`}>
+        <div className="flex items-start justify-between gap-2 px-4 pb-3 pt-5">
+          {!sidebarCollapsed && (
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-bold text-slate-900">{meeting.title}</h2>
+              <p className="mt-1 text-xs font-semibold text-slate-500">{typeLabel}</p>
+              {meeting.is_recording && (
+                <span className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> Recording
+                </span>
+              )}
+            </div>
+          )}
+          <button type="button" onClick={() => setSidebarCollapsed((v) => !v)}
+            className="shrink-0 rounded-lg border border-slate-200 p-1.5 text-slate-400 hover:bg-slate-50">
+            <svg className={`h-3.5 w-3.5 transition-transform ${sidebarCollapsed ? "rotate-180" : ""}`} viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M12.79 5.23a.75.75 0 010 1.06L9.31 10l3.48 3.71a.75.75 0 11-1.08 1.04l-4-4.25a.75.75 0 010-1.04l4-4.25a.75.75 0 011.08-.02zM7.79 5.23a.75.75 0 010 1.06L4.31 10l3.48 3.71a.75.75 0 11-1.08 1.04l-4-4.25a.75.75 0 010-1.04l4-4.25a.75.75 0 011.08-.02z" clipRule="evenodd" />
             </svg>
           </button>
         </div>
 
-        {/* Timer */}
-        <div className="border-b border-slate-200 bg-slate-50 px-6 py-3">
-          <div className="flex items-center gap-4">
-            <span className="font-mono text-2xl font-bold text-slate-900">{fmtElapsed(elapsed)}</span>
-            <div className="flex-1">
-              <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                <div
-                  className={`h-full rounded-full transition-all ${progress > 90 ? "bg-red-500" : progress > 70 ? "bg-amber-400" : "bg-teal-500"}`}
-                  style={{ width: `${progress}%` }}
-                />
+        {!sidebarCollapsed && (
+          <div className="px-4 pb-3">
+            {meeting.status === "scheduled" && canManage && (
+              <button onClick={() => lifecycle("start")} className="w-full rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">
+                Start Meeting
+              </button>
+            )}
+            {meeting.status === "scheduled" && !canManage && (
+              <p className="rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-500">Waiting for the host to start.</p>
+            )}
+            {(meeting.status === "ongoing" || meeting.status === "paused") && (
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-sm font-bold text-slate-800">{fmtElapsed(elapsed)}</span>
+                {canManage && meeting.status === "ongoing" && (
+                  <button onClick={() => lifecycle("pause")} className="ml-auto text-xs font-medium text-slate-500 hover:text-slate-700">Pause</button>
+                )}
+                {canManage && meeting.status === "paused" && (
+                  <button onClick={() => lifecycle("resume")} className="ml-auto text-xs font-medium text-blue-700 hover:underline">Resume</button>
+                )}
+                {canManage && (
+                  <button onClick={() => lifecycle("end")} className="text-xs font-medium text-red-600 hover:underline">End</button>
+                )}
               </div>
-              <p className="mt-0.5 text-xs text-slate-400">{fmtDuration(meeting.duration_minutes)} planned</p>
-            </div>
-            <div className="flex gap-2">
-              {!canManage && meeting.status !== "completed" && (
-                <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-500">Only the host can control this meeting.</span>
-              )}
-              {canManage && meeting.status === "scheduled" && (
-                <button onClick={() => lifecycle("start")} className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700">Start Meeting</button>
-              )}
-              {canManage && meeting.status === "ongoing" && (
-                <>
-                  <button onClick={() => lifecycle("pause")} className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100">Pause</button>
-                  <button onClick={() => lifecycle("end")} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">End</button>
-                </>
-              )}
-              {canManage && meeting.status === "paused" && (
-                <>
-                  <button onClick={() => lifecycle("resume")} className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700">Resume</button>
-                  <button onClick={() => lifecycle("end")} className="rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700">End</button>
-                </>
-              )}
-              {meeting.status === "completed" && (
-                <span className="rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-600">Completed</span>
-              )}
-            </div>
+            )}
+            {meeting.status === "completed" && (
+              <span className="block rounded-xl bg-slate-100 px-3 py-2 text-center text-xs font-semibold text-slate-600">Completed</span>
+            )}
           </div>
-        </div>
+        )}
 
-        {/* Stage 1: Attendance — shown while scheduled (always, for any meeting type).
-            Renders even with zero participants (host still needs a way to add
-            the first one) whenever the host can manage it. */}
-        {(meeting.participants.length > 0 || canManage) && (meeting.meeting_type !== "l10" || meeting.status === "scheduled") && (() => {
-          const joinedCount = meeting.participants.filter((p) => p.joined_at).length;
-          const pct = meeting.participants.length ? Math.round((joinedCount / meeting.participants.length) * 100) : 0;
-          return (
-            <div className="border-b border-slate-200 px-6 py-4">
-              <h3 className="text-sm font-semibold text-slate-900">Meeting Attendance</h3>
-              <p className="mt-1 text-xs text-slate-500">
-                Click your own avatar to join.
-                {canManage && " As the host, click any attendee's avatar to check them in."}
-              </p>
-
-              {meeting.participants.length > 0 && (
-                <>
-                  <div className="mt-3 flex items-center justify-between text-xs">
-                    <span className="text-slate-500">
-                      {joinedCount} of {meeting.participants.length} participants joined
-                    </span>
-                    <span className="font-semibold text-slate-700">{pct}%</span>
-                  </div>
-                  <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-slate-200">
-                    <div className="h-full rounded-full bg-emerald-500 transition-all" style={{ width: `${pct}%` }} />
-                  </div>
-                </>
-              )}
-
-              <div className="mt-3 flex flex-wrap gap-4">
-                {meeting.participants.map((p) => {
-                  const isSelf = p.user_id === user?.id;
-                  const canClick = isSelf || canManage;
-                  return (
-                    <div key={p.id} className="flex flex-col items-center gap-1">
-                      <AttendanceAvatar
-                        name={p.user?.full_name || p.user?.email}
-                        joined={Boolean(p.joined_at)}
-                        onClick={() => {
-                          if (!canClick) return;
-                          toggleJoined(p);
-                        }}
-                        disabled={!canClick}
-                        title={
-                          isSelf
-                            ? (p.joined_at ? "Click to leave the meeting." : "Click to join the meeting.")
-                            : canManage
-                            ? (p.joined_at ? `${p.user?.full_name || p.user?.email} — joined. Click to check them out.` : `${p.user?.full_name || p.user?.email} — not joined. Click to check them in.`)
-                            : p.user?.full_name || p.user?.email
-                        }
-                      />
-                      {canManage && (
-                        <button type="button" onClick={() => removeParticipant(p)}
-                          className="text-[10px] font-medium text-slate-400 hover:text-red-500">
-                          Remove
+        <div className="flex-1 overflow-y-auto px-2">
+          {meeting.agenda_items.map((item) => {
+            const isCurrent = item.id === meeting.current_agenda_item_id && meeting.status !== "scheduled";
+            const info = sectionInfoForTitle(item.title);
+            const canNavigate = canManage && meeting.status !== "scheduled" && !isCurrent;
+            return (
+              <div key={item.id}>
+                <div
+                  onClick={canNavigate ? () => selectAgendaItem(item.id) : undefined}
+                  className={`mb-1 flex items-center gap-2 rounded-lg px-2.5 py-2.5 ${isCurrent ? "bg-blue-600 text-white" : "text-slate-700 hover:bg-slate-50"} ${canNavigate ? "cursor-pointer" : ""}`}
+                  title={canNavigate ? `Jump to ${item.title}` : undefined}
+                >
+                  <span className={`shrink-0 ${isCurrent ? "text-white" : "text-slate-400"}`}>
+                    <AgendaSectionIcon sectionKey={info.key} />
+                  </span>
+                  {!sidebarCollapsed && (
+                    <>
+                      <span className="min-w-0 flex-1 truncate text-xs font-bold uppercase tracking-wide">{item.title}</span>
+                      <div className="shrink-0 text-right">
+                        {isCurrent ? (
+                          <>
+                            <p className="text-xs font-bold leading-none">
+                              <ItemTimer key={item.id} active={meeting.status === "ongoing"} />
+                            </p>
+                            <p className={`mt-0.5 text-[10px] leading-none ${isCurrent ? "text-blue-100" : "text-slate-400"}`}>{item.duration_minutes} min</p>
+                          </>
+                        ) : (
+                          <p className="text-xs text-slate-500">{item.duration_minutes} min</p>
+                        )}
+                      </div>
+                      {!isCurrent && info.description && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setPreviewItemId((v) => (v === item.id ? null : item.id)); }}
+                          className="shrink-0 text-blue-400 hover:text-blue-600" title="Preview this section">
+                          <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                            <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                          </svg>
                         </button>
                       )}
-                    </div>
-                  );
-                })}
+                      {canManage && !isCurrent && (
+                        <button type="button" onClick={(e) => { e.stopPropagation(); deleteAgendaItem(item.id); }}
+                          className="shrink-0 text-slate-300 hover:text-red-500" title="Delete this section">
+                          <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zm-1 7a1 1 0 012 0v4a1 1 0 11-2 0V9zm4 0a1 1 0 012 0v4a1 1 0 11-2 0V9z" clipRule="evenodd" />
+                          </svg>
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+                {!sidebarCollapsed && previewItemId === item.id && info.description && (
+                  <p className="mb-2 px-3 pb-1 text-xs text-slate-500">{info.description}</p>
+                )}
               </div>
+            );
+          })}
+          {!sidebarCollapsed && canManage && (
+            <div className="mt-1 flex items-center gap-1 px-1">
+              <input
+                value={newAgendaTitle}
+                onChange={(e) => setNewAgendaTitle(e.target.value)}
+                placeholder="+ Add section…"
+                onKeyDown={(e) => e.key === "Enter" && addAgendaItem()}
+                className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1.5 text-xs text-slate-600 placeholder:text-slate-400 hover:border-slate-200 focus:border-slate-300 focus:outline-none"
+              />
+              {newAgendaTitle.trim() && (
+                <button type="button" onClick={addAgendaItem} className="shrink-0 rounded-lg bg-slate-900 px-2 py-1 text-xs font-semibold text-white hover:bg-slate-800">
+                  Add
+                </button>
+              )}
+            </div>
+          )}
+        </div>
 
-              {canManage && (
-                <div className="mt-4 flex items-center gap-2 border-t border-slate-100 pt-3">
-                  <Select value={addParticipantId} onChange={(e) => setAddParticipantId(e.target.value)}
-                    className="max-w-xs flex-1 px-3 py-2 text-sm">
-                    <option value="">
-                      {availableToAdd.length === 0 ? "No more org members to add" : "Add a participant…"}
-                    </option>
-                    {availableToAdd.map((u) => (
-                      <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
-                    ))}
+        {!sidebarCollapsed && canManage && meeting.status === "ongoing" && (
+          <div className="border-t border-slate-100 p-3">
+            <button onClick={advanceAgenda} className="w-full rounded-xl bg-blue-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-800">
+              Next
+            </button>
+          </div>
+        )}
+
+        <button onClick={onClose} className="flex items-center gap-1.5 border-t border-slate-100 px-4 py-3.5 text-sm font-medium text-blue-700 hover:bg-slate-50">
+          <svg className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+            <path fillRule="evenodd" d="M17 10a.75.75 0 01-.75.75H5.612l4.158 3.96a.75.75 0 11-1.04 1.08l-5.5-5.25a.75.75 0 010-1.08l5.5-5.25a.75.75 0 111.04 1.08L5.612 9.25H16.25A.75.75 0 0117 10z" clipRule="evenodd" />
+          </svg>
+          {!sidebarCollapsed && "Leave Meeting"}
+        </button>
+      </div>
+
+      {/* ── Main ── */}
+      <div className="relative flex flex-1 flex-col overflow-hidden">
+        {/* Reactions land here — a full-bleed overlay pinned to this
+            content pane (not the bottom toolbar), so a reaction has the
+            entire content height to rise through, not just a sliver near
+            the buttons. This pane (the parent `relative` wrapper above)
+            spans the full available height, so `inset-0` here really does
+            give each reaction the whole pane to travel across. Each
+            FloatingReaction drives its own rise/drift/fade directly via
+            the Web Animations API — see the component for why (a plain
+            CSS class + custom-property combination here compiled fine but
+            never visibly animated in the browser). pointer-events-none +
+            overflow-hidden: reactions never block clicks, never cause a
+            scrollbar, and are purely visual — no page layout depends on
+            this div's size. z-30 keeps them above the toolbar/popovers in
+            this pane. */}
+        <div className="pointer-events-none absolute inset-0 z-30 overflow-hidden">
+          {floatingReactions.map((r) => (
+            <FloatingReaction key={r.id} {...r} onDone={() => removeFloatingReaction(r.id)} />
+          ))}
+        </div>
+
+        {meeting.status === "ongoing" && canManage && (
+          <div className="flex items-center justify-end gap-2 border-b border-slate-100 px-6 py-3">
+            <div className="relative">
+              <button type="button" onClick={openTodoFlow}
+                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" /></svg>
+                Add To-Do
+              </button>
+              {todoTeamPickerOpen && (
+                <div className="absolute right-0 top-9 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                  <p className="mb-2 text-xs font-semibold text-slate-500">Which team is this to-do for?</p>
+                  <Select value={pickedTeamId} onChange={(e) => setPickedTeamId(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-sm text-slate-700">
+                    {defaultTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
                   </Select>
-                  <button type="button" onClick={addParticipant} disabled={!addParticipantId || addingParticipant}
-                    className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
-                    {addingParticipant ? "Adding…" : "+ Add"}
-                  </button>
+                  <div className="mt-2 flex gap-2">
+                    <button type="button" onClick={() => setTodoTeamPickerOpen(false)}
+                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+                    <button type="button" onClick={confirmTodoTeam}
+                      className="flex-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">Continue</button>
+                  </div>
                 </div>
               )}
             </div>
-          );
-        })()}
+            <button type="button" onClick={() => (defaultTeams.length ? setIssueModalOpen(true) : toast.error("No team available to file this issue under."))}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+              <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
+              Add Issue
+            </button>
+            <button type="button" onClick={() => (defaultTeams.length ? setNewsModalOpen(true) : toast.error("No team available to post this news item under."))}
+              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+              <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M3.5 3.75A.75.75 0 014.25 3h10.5a.75.75 0 01.6 1.2l-3 4a.75.75 0 000 .9l3 4a.75.75 0 01-.6 1.2H5.5v3.25a.75.75 0 01-1.5 0V3.75z" /></svg>
+              Add News
+            </button>
+            {!isRecordingLocal ? (
+              <button type="button" onClick={() => setRecordingModalOpen(true)}
+                className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">
+                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                  <path d="M7 4a3 3 0 116 0v6a3 3 0 11-6 0V4z" />
+                  <path d="M5.5 9.643a.75.75 0 00-1.5 0V10c0 3.06 2.29 5.585 5.25 5.954V17.5h-1.5a.75.75 0 000 1.5h4.5a.75.75 0 000-1.5h-1.5v-1.546A6.001 6.001 0 0016 10v-.357a.75.75 0 00-1.5 0V10a4.5 4.5 0 01-9 0v-.357z" />
+                </svg>
+                Record Transcription
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5">
+                <span className="flex items-center gap-1.5 px-1 text-xs font-semibold text-red-600">
+                  <span className={`h-1.5 w-1.5 rounded-full bg-red-500 ${isPausedLocal ? "" : "animate-pulse"}`} />
+                  {isPausedLocal ? "Paused" : "Recording"}
+                </span>
+                {isPausedLocal ? (
+                  <button type="button" onClick={resumeRecording} disabled={stoppingRecording}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                    Resume
+                  </button>
+                ) : (
+                  <button type="button" onClick={pauseRecording} disabled={stoppingRecording}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+                    Pause Recording
+                  </button>
+                )}
+                <button type="button" onClick={stopAndSaveRecording} disabled={stoppingRecording}
+                  className="rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60">
+                  {stoppingRecording ? "Processing…" : "Stop & Save"}
+                </button>
+                <button type="button" onClick={cancelRecording} disabled={stoppingRecording}
+                  className="rounded-md px-2.5 py-1 text-xs font-semibold text-red-600 hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50">
+                  Cancel Recording
+                </button>
+              </div>
+            )}
+          </div>
+        )}
 
-        {/* Stage 2: Speaking Order (L10 personal check-in) — replaces Attendance once the meeting starts */}
-        {meeting.meeting_type === "l10" && meeting.status !== "scheduled" && (() => {
-          const allSpoken = checkinPool.length > 0 && checkinPool.every((p) => p.spoken_at);
-          const hasStarted = meeting.checkin_current_participant_id || checkinPool.some((p) => p.spoken_at);
-          const remainingCandidates = checkinPool.filter(
-            (p) => !p.spoken_at && p.id !== meeting.checkin_current_participant_id
-          );
+        {isRecordingLocal && !isPausedLocal && (
+          <div className="border-b border-slate-100 bg-slate-50 px-6 py-1.5 text-right text-xs text-slate-500">
+            {listeningPreview ? <span className="italic">"…{listeningPreview}"</span> : "Listening… (say something to confirm the mic is working)"}
+          </div>
+        )}
 
-          return (
-            <div className="border-b border-slate-200 px-6 py-4">
-              <h3 className="text-sm font-semibold text-slate-900">Speaking Order</h3>
-              <p className="mt-1 text-xs text-slate-500">
-                The roulette picks who speaks next. Once that person is done, click their avatar (or Complete) to spin again for the remaining attendees.
-              </p>
-              {checkinPool.length === 0 ? (
-                <p className="mt-3 rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-500">
-                  No joined participants to speak.
+        {recordingModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/40 p-8 backdrop-blur-sm">
+            <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
+              <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
+                <h2 className="text-base font-bold text-slate-900">Record Transcription</h2>
+                <button type="button" onClick={() => setRecordingModalOpen(false)}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600">
+                  <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                  </svg>
+                </button>
+              </div>
+
+              <div className="space-y-4 p-6">
+                <button type="button" onClick={beginRecording}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-orange-500 px-4 py-3 text-sm font-semibold text-white hover:bg-orange-600">
+                  <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor"><path d="M6 4l10 6-10 6V4z" /></svg>
+                  Start Recording
+                </button>
+
+                <p className="text-xs text-slate-500">
+                  Speech is transcribed live in your browser as the meeting happens — no audio is ever uploaded or stored.
+                  {" "}Once started, you can pause, resume, cancel, or stop &amp; save from the toolbar. Stopping and saving
+                  {" "}analyzes the transcript and adds any clear action items to this meeting's To-Do list automatically.
                 </p>
-              ) : (
-                <>
-                  <div className="mt-4 flex flex-wrap gap-4">
-                    {checkinPool.map((p) => {
-                      const isCurrent = p.id === meeting.checkin_current_participant_id;
-                      const isFlashing = checkinSpinning && p.id === checkinFlashId;
-                      const state = isCurrent ? "current" : isFlashing ? "flashing" : p.spoken_at ? (p.skipped ? "skipped" : "done") : "waiting";
-                      return (
-                        <SpeakingOrderAvatar
-                          key={p.id}
-                          name={p.user?.full_name || p.user?.email}
-                          state={state}
-                          onClick={() => isCurrent && !checkinSpinning && advanceCheckin()}
-                        />
-                      );
-                    })}
-                  </div>
-                  <div className={`mt-3 rounded-lg px-3 py-2 text-xs ${allSpoken && !checkinSpinning ? "bg-emerald-50 font-semibold text-emerald-700" : "bg-slate-50 text-slate-500"}`}>
-                    {checkinSpinning
-                      ? "Picking the next speaker…"
-                      : meeting.checkin_current_participant_id
-                      ? "Click the highlighted avatar, or Complete, once that person has finished speaking."
-                      : allSpoken
-                      ? "Speaking round completed"
-                      : "Start the check-in to pick the first speaker."}
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2">
-                    {!meeting.checkin_current_participant_id && !allSpoken && (
-                      <button type="button" onClick={advanceCheckin} disabled={checkinSpinning}
-                        className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
-                        {checkinSpinning ? "Picking…" : "Start Check-in"}
-                      </button>
-                    )}
-                    {meeting.checkin_current_participant_id && (
+
+                {lastRecordingResult && (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-700">
+                    {lastRecordingResult.length > 0 ? (
                       <>
+                        <p className="font-semibold">Created {lastRecordingResult.length} to-do{lastRecordingResult.length > 1 ? "s" : ""}:</p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4">
+                          {lastRecordingResult.map((t, i) => (
+                            <li key={i}>{t.title}{t.assignee_name ? ` — ${t.assignee_name}` : ""}{t.due_date ? ` (due ${t.due_date})` : ""}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      "No clear action items were found in the transcript."
+                    )}
+                  </div>
+                )}
+
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                  <p className="font-semibold">Important</p>
+                  <p className="mt-1">Works best in Chrome or Edge, with your microphone unmuted. Keep this tab open while recording.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {todoModalOpen && todoModalTeam && (
+          <CreateTodoModal
+            team={todoModalTeam}
+            users={orgUsers}
+            onClose={() => { setTodoModalOpen(false); setTodoModalTeam(null); }}
+            onSave={saveTodoFromMeeting}
+            saving={todoSaving}
+          />
+        )}
+        {issueModalOpen && (
+          <IssueModal
+            team={defaultTeams[0]}
+            teams={defaultTeams}
+            users={orgUsers}
+            projects={[]}
+            onClose={() => setIssueModalOpen(false)}
+            onSave={saveIssueFromMeeting}
+            saving={issueSaving}
+          />
+        )}
+        {newsModalOpen && (
+          <NewsModal
+            team={defaultTeams[0]}
+            teams={defaultTeams}
+            users={orgUsers}
+            currentUser={user}
+            onClose={() => setNewsModalOpen(false)}
+            onSave={saveNewsFromMeeting}
+            saving={newsSaving}
+          />
+        )}
+
+        {/* ── Live view: waiting room (scheduled) or agenda runner (ongoing/paused) ── */}
+        {meeting.status === "scheduled" ? (
+          <div className="flex-1 overflow-y-auto px-8 py-6">
+            <h1 className="text-xl font-bold text-slate-800">Waiting for Attendees to Join</h1>
+            <div className="mt-6 flex flex-wrap gap-x-10 gap-y-6">
+              {/* You aren't on the invite list yet — join anyway. Being
+                  able to open this meeting at all (e.g. from the org-wide
+                  Meetings page) shouldn't require having been formally
+                  invited beforehand to actually take part in it. */}
+              {!selfParticipant && (
+                <div className="flex items-center gap-3">
+                  <Avatar name={user?.full_name || user?.email} size="h-11 w-11" />
+                  <div>
+                    <p className="text-base font-semibold text-slate-500">{user?.full_name || user?.email}</p>
+                    <button type="button" onClick={joinAsSelf}
+                      className="mt-0.5 rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                      Join Meeting
+                    </button>
+                  </div>
+                </div>
+              )}
+              {meeting.participants.length === 0 ? (
+                <p className="text-sm text-slate-400">No other attendees invited yet.</p>
+              ) : (
+                // Every invited attendee is shown, not just who's already
+                // joined — self gets a Join/Leave button, and the host can
+                // toggle anyone else present/absent (same toggleJoined()
+                // used everywhere else attendance is taken).
+                meeting.participants.map((p) => {
+                  const isSelf = p.user_id === user?.id;
+                  const joined = Boolean(p.joined_at);
+                  const name = p.user?.full_name || p.user?.email;
+                  return (
+                    <div key={p.id} className={`flex items-center gap-3 ${joined ? "" : "opacity-50"}`}>
+                      <Avatar name={name} size="h-11 w-11" />
+                      <div>
+                        <p className={`text-base font-semibold ${joined ? "text-slate-900" : "text-slate-500"}`}>{name}</p>
+                        {isSelf ? (
+                          <button type="button" onClick={() => toggleJoined(p)}
+                            className="mt-0.5 rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                            {joined ? "Leave Meeting" : "Join Meeting"}
+                          </button>
+                        ) : canManage ? (
+                          <div className="mt-1 flex items-center gap-2">
+                            <button type="button" onClick={() => toggleJoined(p)}
+                              className="flex items-center gap-2 text-xs font-medium text-slate-500">
+                              <span className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${joined ? "bg-emerald-500" : "bg-slate-300"}`}>
+                                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${joined ? "translate-x-4" : "translate-x-0.5"}`} />
+                              </span>
+                              {joined ? "Present" : "Absent"}
+                            </button>
+                            <button type="button" onClick={() => removeParticipant(p)} className="text-xs font-medium text-slate-400 hover:text-red-500">
+                              Remove
+                            </button>
+                          </div>
+                        ) : (
+                          <p className="mt-0.5 text-xs text-slate-400">{joined ? "Present" : "Absent"}</p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            {canManage && (
+              <div className="mt-6 flex max-w-sm items-center gap-2">
+                <Select value={addParticipantId} onChange={(e) => setAddParticipantId(e.target.value)} className="flex-1 px-3 py-2 text-sm">
+                  <option value="">{availableToAdd.length === 0 ? "No more org members to add" : "Add an attendee…"}</option>
+                  {availableToAdd.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
+                </Select>
+                <button type="button" onClick={addParticipant} disabled={!addParticipantId || addingParticipant}
+                  className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">
+                  {addingParticipant ? "Adding…" : "+ Add"}
+                </button>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-1 flex-col items-center overflow-y-auto px-8 py-8 text-center">
+            {currentItem ? (
+              <>
+                <div className="flex items-center gap-2 text-sm font-bold uppercase tracking-wide text-slate-800">
+                  <AgendaSectionIcon sectionKey={currentInfo.key} className="h-4 w-4 text-slate-500" />
+                  {currentItem.title}
+                  {currentInfo.description && <span className="ml-1 font-normal normal-case text-slate-400">· {currentInfo.description}</span>}
+                </div>
+
+                {currentInfo.key === "scorecard" ? (
+                  <div className="mt-8 flex w-full flex-1 justify-center"><KpiSection /></div>
+                ) : currentInfo.key === "rock_review" ? (
+                  <div className="mt-8 flex w-full flex-1 justify-center"><RockReviewSection canManage={canManage} /></div>
+                ) : currentInfo.key === "news" ? (
+                  <div className="mt-8 flex w-full flex-1 justify-center"><NewsSection canManage={canManage} extraItems={extraNews} /></div>
+                ) : currentInfo.key === "todo_list" ? (
+                  <div className="mt-8 flex w-full flex-1 justify-center">
+                    <TodoListSection meeting={meeting} canManage={canManage} taskName={taskName} setTaskName={setTaskName} onCreateTask={createTask} extraTeamTasks={extraTeamTasks} />
+                  </div>
+                ) : currentInfo.key === "ids" ? (
+                  <div className="mt-8 flex w-full flex-1 justify-center"><IdsSection canManage={canManage} extraItems={extraIssues} /></div>
+                ) : currentInfo.key === "conclude" ? (
+                  <div className="mt-8 flex w-full flex-1 justify-center">
+                    <ConcludeSection
+                      meeting={meeting} canManage={canManage} selfParticipant={selfParticipant}
+                      taskName={taskName} setTaskName={setTaskName} onCreateTask={createTask}
+                      decisionContent={decisionContent} setDecisionContent={setDecisionContent}
+                      onAddDecision={addDecision} onDeleteDecision={deleteDecision}
+                      onSubmitRating={(score) => submitScore(user.id, score)}
+                      onEndMeeting={concludeMeeting}
+                    />
+                  </div>
+                ) : checkinPool.length > 0 ? (
+                  <>
+                    {/* One row, one box per joined attendee — bordered/highlighted
+                        for whoever's current. (Previously this also drew a
+                        separate large avatar for the current speaker above this
+                        same row, showing that one person twice.) */}
+                    <div className="mt-10 flex flex-wrap justify-center gap-3">
+                      {checkinPool.map((p) => {
+                        const isCurrent = p.id === meeting.checkin_current_participant_id;
+                        const isFlashing = checkinSpinning && p.id === checkinFlashId;
+                        const state = isCurrent ? "current" : isFlashing ? "flashing" : p.spoken_at ? (p.skipped ? "skipped" : "done") : "waiting";
+                        return (
+                          <SpeakingOrderAvatar key={p.id} name={p.user?.full_name || p.user?.email} state={state}
+                            onClick={() => isCurrent && !checkinSpinning && advanceCheckin()} />
+                        );
+                      })}
+                    </div>
+                    {!currentSpeaker && (
+                      <p className="mt-3 text-sm text-slate-400">{allSpoken ? "Round complete" : "No one selected yet"}</p>
+                    )}
+
+                    <div className="mt-6 flex items-center gap-2">
+                      {!allSpoken && (
                         <button type="button" onClick={advanceCheckin} disabled={checkinSpinning}
-                          className="rounded-lg bg-teal-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-60">
-                          Complete
+                          className="rounded-xl bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-60">
+                          {checkinSpinning ? "Picking…" : "Auto Pick Next"}
                         </button>
-                        <button type="button" onClick={skipCheckin} disabled={checkinSpinning}
-                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60">
+                      )}
+                      {currentSpeaker && !checkinSpinning && (
+                        <button type="button" onClick={skipCheckin}
+                          className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50">
                           Skip
                         </button>
-                      </>
-                    )}
-                    {hasStarted && (
-                      <button type="button" onClick={resetCheckin} disabled={checkinSpinning}
-                        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60">
-                        Restart Round
-                      </button>
-                    )}
-                    {allSpoken && !checkinSpinning && (
-                      <button type="button" onClick={() => setActiveSection("agenda")}
-                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
-                        Continue to Agenda
-                      </button>
-                    )}
-                    {remainingCandidates.length > 0 && (
-                      <div className="ml-auto flex items-center gap-1.5">
-                        <Select
-                          value={manualSpeakerId}
-                          onChange={(e) => setManualSpeakerId(e.target.value)}
-                          className="rounded-lg border border-slate-300 px-2 py-1.5 text-xs text-slate-700 focus:outline-none"
-                        >
-                          <option value="">Pick speaker manually…</option>
+                      )}
+                      {remainingCandidates.length > 0 && (
+                        <Select value={manualSpeakerId} onChange={(e) => setManualSpeakerId(e.target.value)}
+                          className="px-3 py-2.5 text-xs">
+                          <option value="">Pick manually…</option>
                           {remainingCandidates.map((p) => (
                             <option key={p.id} value={p.user_id}>{p.user?.full_name || p.user?.email}</option>
                           ))}
                         </Select>
-                        <button type="button" onClick={selectSpeaker} disabled={!manualSpeakerId || checkinSpinning}
-                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60">
-                          Set
-                        </button>
-                      </div>
+                      )}
+                      {manualSpeakerId && (
+                        <button type="button" onClick={selectSpeaker} className="text-xs font-semibold text-blue-700 hover:underline">Set</button>
+                      )}
+                    </div>
+                    {(meeting.checkin_current_participant_id || checkinPool.some((p) => p.spoken_at)) && !checkinSpinning && (
+                      <button type="button" onClick={resetCheckin} className="mt-3 text-xs font-medium text-slate-400 hover:text-slate-600">
+                        Restart Round
+                      </button>
                     )}
-                  </div>
-                </>
-              )}
-            </div>
-          );
-        })()}
+                  </>
+                ) : (
+                  <p className="mt-10 text-sm text-slate-400">No joined attendees yet — reactions and speaking order will appear here once people join.</p>
+                )}
+              </>
+            ) : (
+              <p className="mt-10 text-sm text-slate-400">All agenda items complete.</p>
+            )}
+          </div>
+        )}
 
-        {/* Section nav */}
-        <div className="flex border-b border-slate-200 px-6">
-          {sections.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => setActiveSection(s.id)}
-              className={`border-b-2 px-4 py-3 text-sm font-medium transition-colors ${
-                activeSection === s.id
-                  ? "border-teal-600 text-teal-700"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              {s.label}
-              {s.id === "agenda" && meeting.agenda_items.length > 0 && (
-                <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-xs">{meeting.agenda_items.length}</span>
-              )}
-              {s.id === "decisions" && meeting.decisions.length > 0 && (
-                <span className="ml-1.5 rounded-full bg-slate-100 px-1.5 py-0.5 text-xs">{meeting.decisions.length}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* Section content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {activeSection === "agenda" && (
-            <div className="space-y-4">
-              {meeting.status !== "scheduled" && meeting.agenda_items.length > 0 && (
-                <div className="flex items-center justify-between rounded-xl border border-teal-200 bg-teal-50 px-3 py-2">
-                  <span className="text-xs text-teal-700">
-                    {meeting.current_agenda_item_id
-                      ? `Current: ${meeting.agenda_items.find((a) => a.id === meeting.current_agenda_item_id)?.title || "—"}`
-                      : "All agenda items complete."}
-                  </span>
-                  {canManage && (
-                    <button onClick={advanceAgenda}
-                      className="rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-teal-700">
-                      Next Agenda Item
-                    </button>
+        {meeting.status !== "scheduled" && (
+          <div className="flex items-center justify-between border-t border-slate-100 px-6 py-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">Joined</p>
+              <div className="mt-1.5 flex items-center gap-2">
+                <div className="flex -space-x-1.5">
+                  {joinedParticipants.length === 0 ? (
+                    <span className="text-xs text-slate-300">No one yet</span>
+                  ) : (
+                    joinedParticipants.map((p) => (
+                      <span key={p.id} className="relative rounded-full ring-2 ring-white" title={p.user?.full_name || p.user?.email}>
+                        <Avatar name={p.user?.full_name || p.user?.email} size="h-7 w-7" />
+                        {p.user_id != null && avatarReactions[p.user_id] && (
+                          <AvatarReactionBadge
+                            key={avatarReactions[p.user_id].key}
+                            emoji={avatarReactions[p.user_id].emoji}
+                            onDone={() => clearAvatarReaction(p.user_id, avatarReactions[p.user_id].key)}
+                          />
+                        )}
+                      </span>
+                    ))
                   )}
                 </div>
-              )}
-              <AgendaList
-                items={meeting.agenda_items}
-                canManage={canManage}
-                liveMeetingId={meeting.id}
-                currentItemId={meeting.current_agenda_item_id}
-                onUpdate={updateAgendaItem}
-                onDelete={deleteAgendaItem}
-                onReorder={reorderAgenda}
-              />
-              {canManage && (
-                <div className="flex gap-2">
-                  <input
-                    value={newAgendaTitle}
-                    onChange={(e) => setNewAgendaTitle(e.target.value)}
-                    placeholder="New agenda item…"
-                    onKeyDown={(e) => e.key === "Enter" && addAgendaItem()}
-                    className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                  />
-                  <button onClick={addAgendaItem} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">Add</button>
-                </div>
-              )}
+                {/* You're viewing a meeting already in progress and aren't
+                    on the participant list yet — same self-join affordance
+                    as the pre-start waiting room. */}
+                {!selfParticipant && (
+                  <button type="button" onClick={joinAsSelf}
+                    className="rounded-lg border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50">
+                    Join
+                  </button>
+                )}
+              </div>
             </div>
-          )}
+            <div className="flex items-center gap-1">
+              {REACTION_EMOJIS.map((emoji) => (
+                <button key={emoji} type="button" onClick={() => fireReaction(emoji)}
+                  className="rounded-lg p-1.5 text-lg transition-transform hover:scale-110 hover:bg-slate-50">
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
-          {activeSection === "notes" && (
-            <div className="space-y-4">
-              <textarea
-                value={noteContent}
-                onChange={(e) => handleNoteChange(e.target.value)}
-                placeholder="Type meeting notes… (auto-saved)"
-                rows={12}
-                className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-              />
-              {meeting.notes.length > 0 && (
-                <div className="space-y-3">
-                  <h4 className="text-xs font-semibold uppercase text-slate-400">Saved Notes</h4>
-                  {meeting.notes.map((note) => (
-                    <div key={note.id} className="rounded-xl border border-slate-200 p-3">
-                      <p className="whitespace-pre-wrap text-sm text-slate-700">{note.content}</p>
-                      <p className="mt-1 text-xs text-slate-400">{fmtDateTime(note.updated_at)}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {activeSection === "decisions" && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                {meeting.decisions.map((d) => (
-                  <div key={d.id} className="flex items-start gap-2 rounded-xl border border-slate-200 p-3">
-                    <svg className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" viewBox="0 0 20 20" fill="currentColor">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-9.809a.75.75 0 00-1.214-.882l-3.483 4.79-1.88-1.88a.75.75 0 10-1.06 1.061l2.5 2.5a.75.75 0 001.137-.089l4-5.5z" clipRule="evenodd" />
-                    </svg>
-                    <p className="flex-1 text-sm text-slate-700">{d.content}</p>
-                    <button onClick={() => deleteDecision(d.id)} className="text-slate-300 hover:text-red-500">
-                      <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-                      </svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={decisionContent}
-                  onChange={(e) => setDecisionContent(e.target.value)}
-                  placeholder="Record a decision…"
-                  onKeyDown={(e) => e.key === "Enter" && addDecision()}
-                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <button onClick={addDecision} className="rounded-xl bg-amber-500 px-4 py-2 text-sm font-medium text-white hover:bg-amber-600">Add</button>
-              </div>
-            </div>
-          )}
-
-          {activeSection === "tasks" && (
-            <div className="space-y-4">
-              <div className="space-y-2">
-                {meeting.meeting_tasks.map((mt) => (
-                  <div key={mt.id} className="flex items-center gap-2 rounded-xl border border-slate-200 p-3">
-                    <svg className="h-4 w-4 shrink-0 text-teal-500" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M7 3a1 1 0 000 2h6a1 1 0 100-2H7zM4 7a1 1 0 011-1h10a1 1 0 110 2H5a1 1 0 01-1-1zM2 11a2 2 0 012-2h12a2 2 0 012 2v4a2 2 0 01-2 2H4a2 2 0 01-2-2v-4z" />
-                    </svg>
-                    <span className="flex-1 text-sm text-slate-700">{mt.task?.name || `Task #${mt.task_id}`}</span>
-                    <span className={`rounded-full px-2 py-0.5 text-xs capitalize ${
-                      mt.task?.status === "done" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"
-                    }`}>{mt.task?.status || "todo"}</span>
-                  </div>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  value={taskName}
-                  onChange={(e) => setTaskName(e.target.value)}
-                  placeholder="Create a task…"
-                  onKeyDown={(e) => e.key === "Enter" && createTask()}
-                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500"
-                />
-                <button onClick={createTask} className="rounded-xl bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700">Create</button>
-              </div>
-            </div>
-          )}
-
-          {activeSection === "wrapup" && (
-            <div className="space-y-4">
-              <div>
-                <h4 className="text-sm font-semibold text-slate-900">Attendee scores</h4>
-                <p className="mt-1 text-xs text-slate-500">Scores update as soon as attendees submit.</p>
-              </div>
-              {meeting.participants.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-200 py-6 text-center text-xs text-slate-400">
-                  No participants on this meeting.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                  {meeting.participants.map((p) => {
-                    const isSelf = p.user_id === user?.id;
-                    return (
-                      <div key={p.id} className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2.5 ${isSelf ? "border-teal-300 bg-teal-50/40" : "border-slate-200"}`}>
-                        <div className="flex min-w-0 items-center gap-2.5">
-                          <Avatar name={p.user?.full_name || p.user?.email} />
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-slate-900">{p.user?.full_name || p.user?.email}</p>
-                            <p className="text-xs text-slate-400">{p.score != null ? `Score: ${p.score}` : "Score: Not scored yet"}</p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => isSelf && setScoringFor(p)}
-                          disabled={!isSelf}
-                          className={`shrink-0 rounded-lg border px-3 py-1.5 text-xs font-semibold ${
-                            isSelf ? "border-slate-300 text-slate-700 hover:bg-slate-50" : "cursor-default border-slate-100 text-slate-300"
-                          }`}
-                        >
-                          Score
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
       </div>
-
-      {scoringFor && (
-        <ScoreModal
-          participant={scoringFor}
-          onClose={() => setScoringFor(null)}
-          onSubmit={(score, note) => submitScore(scoringFor.user_id, score, note)}
-        />
-      )}
     </div>
   );
 }
