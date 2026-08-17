@@ -90,7 +90,7 @@ const TIMEFRAME_OPTIONS = [
   { value: "archived",   label: "Archived"   },
 ];
 
-function IssueModal({ team, users, teams, projects, editing, onClose, onSave, saving }) {
+export function IssueModal({ team, users, teams, projects, editing, onClose, onSave, saving }) {
   const [title, setTitle]       = useState(editing?.title || "");
   const [icon, setIcon]         = useState(editing?.icon || null);
   const [desc, setDesc]         = useState(editing?.description || "");

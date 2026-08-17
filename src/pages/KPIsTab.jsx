@@ -290,7 +290,7 @@ const FORMULA_OPTIONS = [
 ];
 const VIEW_OPTIONS = ["weekly", "monthly", "quarterly", "yearly"];
 
-function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, editing, onClose, onSave, saving, onGroupCreated }) {
+export function KPIModal({ team, users, rocks, teams, projects, groups, currentUser, editing, onClose, onSave, saving, onGroupCreated }) {
   const [title, setTitle] = useState(editing?.title || "");
   const [icon, setIcon] = useState(editing?.icon || null);
   const [desc, setDesc] = useState(editing?.description || "");

@@ -302,7 +302,8 @@ export default function ReportEditPage() {
         report.rock_snapshots.length === 0 ? (
           <EmptyState label="Rocks" />
         ) : (
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="text-xs font-semibold uppercase text-slate-400">
               <tr>
                 <th className="py-2">Title</th>
@@ -324,6 +325,7 @@ export default function ReportEditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )
       ) : null}
 
@@ -331,7 +333,8 @@ export default function ReportEditPage() {
         report.kpi_snapshots.length === 0 ? (
           <EmptyState label="KPI data" />
         ) : (
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="text-xs font-semibold uppercase text-slate-400">
               <tr>
                 <th className="py-2">KPI</th>
@@ -353,6 +356,7 @@ export default function ReportEditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )
       ) : null}
 
@@ -360,7 +364,8 @@ export default function ReportEditPage() {
         report.milestone_snapshots.length === 0 ? (
           <EmptyState label="Milestones" />
         ) : (
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="text-xs font-semibold uppercase text-slate-400">
               <tr>
                 <th className="py-2">Milestone</th>
@@ -382,6 +387,7 @@ export default function ReportEditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )
       ) : null}
 
@@ -389,7 +395,8 @@ export default function ReportEditPage() {
         report.task_snapshots.length === 0 ? (
           <EmptyState label="tasks" />
         ) : (
-          <table className="w-full text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="text-xs font-semibold uppercase text-slate-400">
               <tr>
                 <th className="py-2">Task</th>
@@ -414,6 +421,7 @@ export default function ReportEditPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )
       ) : null}
 

@@ -19,6 +19,8 @@ import ReportPreviewPage from "../pages/ReportPreviewPage";
 import TasksPage from "../pages/TasksPage";
 import IssuesPage from "../pages/IssuesPage";
 import MeetingsPage from "../pages/MeetingsPage";
+import MeetingDetailPage from "../pages/MeetingDetailPage";
+import CreateMeetingPage from "../pages/CreateMeetingPage";
 import ClientOnboardingsPage from "../pages/ClientOnboardingsPage";
 import OnboardingDetailPage from "../pages/OnboardingDetailPage";
 import OnboardingTemplatesPage from "../pages/OnboardingTemplatesPage";
@@ -62,6 +64,8 @@ export default function AppRouter() {
             <Route path="/users/:userId/scoreboard" element={<UserScoreboardPage />} />
             <Route path="/users/:userId/client-requests" element={<ClientTaskRequestsPage />} />
             <Route path="/meetings" element={<MeetingsPage />} />
+            <Route path="/meetings/new" element={<CreateMeetingPage />} />
+            <Route path="/meetings/:meetingId" element={<MeetingDetailPage />} />
             <Route path="/scoreboard" element={<OrganizationScoreboardPage />} />
             <Route path="/teams" element={<TeamsPage />} />
             <Route path="/teams/:teamId" element={<TeamDetailPage />} />

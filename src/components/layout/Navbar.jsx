@@ -133,6 +133,11 @@ export default function Navbar({ unreadCount = 0, onUnreadCountChange, onUnreadC
       navigate(user?.role === "client" ? `/client/projects/${n.project_id}` : `/projects/${n.project_id}`);
     } else if (n.task_id) {
       navigate("/tasks");
+    } else if (n.meeting_id) {
+      // Same `?live=<id>` URL-persisted live meeting state MeetingsPage.jsx
+      // already uses elsewhere — opens straight into that meeting's live
+      // panel instead of just the general Meetings list.
+      navigate(`/meetings?live=${n.meeting_id}`);
     }
   }
 

@@ -14,6 +14,9 @@ export const meetingApi = {
   create(payload) {
     return apiClient.post(`/meetings`, payload);
   },
+  checkTitle(title) {
+    return apiClient.get(`/meetings/check-title?title=${encodeURIComponent(title)}`);
+  },
   get(meetingId) {
     return apiClient.get(`/meetings/${meetingId}`);
   },
@@ -36,6 +39,9 @@ export const meetingApi = {
   },
   end(meetingId) {
     return apiClient.post(`/meetings/${meetingId}/end`);
+  },
+  sendSummary(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/send-summary`);
   },
 
   setParticipantJoined(meetingId, userId, joined) {
@@ -73,6 +79,31 @@ export const meetingApi = {
   },
   advanceAgenda(meetingId) {
     return apiClient.post(`/meetings/${meetingId}/agenda/next`);
+  },
+  selectAgendaItem(meetingId, itemId) {
+    return apiClient.post(`/meetings/${meetingId}/agenda/${itemId}/select`);
+  },
+
+  // recording -> transcript -> AI task extraction. No audio ever leaves the
+  // browser via this API — only the transcript text produced by the
+  // browser's own speech recognition; the backend stores it and runs the
+  // existing AI task extractor against it.
+  startRecording(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/recording/start`);
+  },
+  stopRecording(meetingId, transcriptText) {
+    return apiClient.post(`/meetings/${meetingId}/recording/stop`, { text: transcriptText });
+  },
+  cancelRecording(meetingId) {
+    return apiClient.post(`/meetings/${meetingId}/recording/cancel`);
+  },
+
+  // live reactions (ephemeral — not meeting history, see backend app.core.meeting_reactions)
+  sendReaction(meetingId, emoji) {
+    return apiClient.post(`/meetings/${meetingId}/reactions`, { emoji });
+  },
+  listReactionsSince(meetingId, sinceId) {
+    return apiClient.get(`/meetings/${meetingId}/reactions?since=${sinceId}`);
   },
 
   // notes
