@@ -201,6 +201,15 @@ export default function ProjectDetailPage() {
   // create-only scope) — kept as a separate flag so those controls stay
   // manager-only below.
   const canCreateTasks = canManageTasks || user?.role === "project_manager" || user?.is_project_manager;
+  // The "Assign Team" dropdown in Create Task: Owners/Admins/Team Managers
+  // keep seeing their existing org-wide-or-managed team list (`teams`, from
+  // GET /teams — unchanged). A plain Project Manager (canCreateTasks but not
+  // canManageTasks) isn't a team manager/member of anything, so GET /teams
+  // legitimately returns nothing for them — instead they get `projectTeams`,
+  // the teams already scoped to *this* project (GET /projects/{id}/items,
+  // gated by the same require_project_access() check that let them open
+  // this project at all), never the full org list.
+  const assignableTeams = (canCreateTasks && !canManageTasks) ? projectTeams : teams;
   const canManageProjects = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   async function handleLogoFileChange(e) {
@@ -2129,16 +2138,18 @@ export default function ProjectDetailPage() {
                 >
                   <option value="">Select team</option>
 
-                  {teams.map((team) => (
+                  {assignableTeams.map((team) => (
                     <option key={team.id} value={team.id}>
                       {team.name}
                     </option>
                   ))}
                 </Select>
 
-                {!teams.length ? (
+                {!assignableTeams.length ? (
                   <p className="mt-1 text-xs text-slate-400">
-                    No teams yet — you can assign one later from the Teams page.
+                    {canCreateTasks && !canManageTasks
+                      ? "No teams are working on this project yet — ask a manager to assign one."
+                      : "No teams yet — you can assign one later from the Teams page."}
                   </p>
                 ) : null}
               </div>

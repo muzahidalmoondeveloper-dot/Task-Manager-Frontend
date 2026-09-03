@@ -683,12 +683,24 @@ function SidebarContent({
 
   const profileRef = useRef(null);
 
+  // Projects and Users are organization-wide administrative systems —
+  // Team Manager is a team-scoped role and must not see either nav item
+  // just by being a Team Manager (that previously let a plain Team
+  // Manager reach the org-wide Projects/Users management UI). A Team
+  // Manager who's *also* been separately granted Admin (`is_org_admin`)
+  // keeps full access via that flag, same as everywhere else in this app.
   const canManageProjects =
-    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   const canViewProjects = canManageProjects || user?.role === "project_manager";
 
   const canManageUsers =
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
+
+  // Scoreboard's own nav visibility is intentionally left untouched here
+  // (out of scope for this fix) — kept as its own variable so it can't
+  // silently change if canManageUsers's definition changes again later.
+  const canViewOrgScoreboard =
     user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   const canManageTeams = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
@@ -936,7 +948,7 @@ function SidebarContent({
             </>
           )}
 
-          {canManageUsers ? (
+          {canViewOrgScoreboard ? (
             <NavItem
               to="/scoreboard"
               icon={<ScoreboardIcon />}

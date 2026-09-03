@@ -253,7 +253,7 @@ export default function OnboardingDetailPage() {
           <span className="text-slate-500">{record.progress_percentage}%</span>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-          <div className="h-full rounded-full bg-slate-900 transition-all" style={{ width: `${record.progress_percentage}%` }} />
+          <div className="brand-fill h-full rounded-full bg-slate-900 transition-all" style={{ width: `${record.progress_percentage}%` }} />
         </div>
       </div>
 

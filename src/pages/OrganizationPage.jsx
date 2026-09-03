@@ -2100,7 +2100,7 @@ function BillingTab() {
             </div>
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
               <div
-                className="h-full rounded-full bg-slate-900"
+                className="brand-fill h-full rounded-full bg-slate-900"
                 style={{ width: usage.limits.max_teams === -1 ? "0%" : `${Math.min(100, (usage.current_teams / usage.limits.max_teams) * 100)}%` }}
               />
             </div>
@@ -2114,7 +2114,7 @@ function BillingTab() {
             </div>
             <div className="mt-1 h-2 overflow-hidden rounded-full bg-slate-100">
               <div
-                className="h-full rounded-full bg-slate-900"
+                className="brand-fill h-full rounded-full bg-slate-900"
                 style={{ width: usage.limits.max_members === -1 ? "0%" : `${Math.min(100, (usage.current_members / usage.limits.max_members) * 100)}%` }}
               />
             </div>

@@ -53,10 +53,29 @@ function ThreeDotsIcon() {
   );
 }
 
+// Organization-wide Users management is Owner/Admin only (role or granted
+// `is_org_admin` flag) — matches the backend, which already gates every
+// /users route (list/create/update/delete) behind require_org_admin. A
+// Team Manager is a team-scoped role and must not reach this page just by
+// URL even though its sidebar link is already hidden for them — same
+// direct-navigation guard pattern as CreateMeetingPage.jsx's permission check.
+function canViewOrgUsers(user) {
+  if (!user) return true; // don't redirect before the user has loaded
+  return user.role === "owner" || user.role === "admin" || Boolean(user.is_org_admin);
+}
+
 export default function UsersPage() {
   const { user } = useAuth();
   const confirm = useConfirm();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (user && !canViewOrgUsers(user)) {
+      toast.error("You don't have permission to access Users.");
+      navigate("/dashboard", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   // Users & teams
   const [users, setUsers] = useState([]);

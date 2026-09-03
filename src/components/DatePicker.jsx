@@ -176,7 +176,7 @@ export default function DatePicker({ name, value, onChange, placeholder = "Selec
                     }`}
                   >
                     {day.getDate()}
-                    {isToday && <span className="absolute bottom-1 h-1 w-1 rounded-full bg-slate-900" />}
+                    {isToday && <span className="brand-fill absolute bottom-1 h-1 w-1 rounded-full bg-slate-900" />}
                   </button>
                 );
               })}
