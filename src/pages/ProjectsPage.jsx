@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Select from "../components/Select";
 import toast from "react-hot-toast";
 
@@ -74,11 +75,37 @@ function ThreeDotsIcon() {
   );
 }
 
+// Organization-wide Projects management: Owner/Admin (role or granted
+// `is_org_admin` flag) and Project Manager (role or granted flag, who gets
+// their own scoped view here — see projectApi.list()'s server-side
+// filtering) may reach this page. A Team Manager is a team-scoped role and
+// has no organization-wide project access by design (see
+// app.core.project_access on the backend) — reaching this route directly
+// by URL must be redirected the same way CreateMeetingPage.jsx already
+// does for its own permission gate, not just have its sidebar link hidden.
+// A Team Manager who's *also* Admin or Project Manager is unaffected.
+function canViewOrgProjects(user) {
+  if (!user) return true; // don't redirect before the user has loaded
+  const isAdminTier = user.role === "owner" || user.role === "admin" || user.is_org_admin;
+  const isProjectManagerTier = user.role === "project_manager" || user.is_project_manager;
+  const isTeamManagerOnly = (user.role === "team_manager" || user.is_team_manager) && !isAdminTier && !isProjectManagerTier;
+  return !isTeamManagerOnly;
+}
+
 export default function ProjectsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const confirm = useConfirm();
   const canManageProjects =
-    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
+
+  useEffect(() => {
+    if (user && !canViewOrgProjects(user)) {
+      toast.error("You don't have permission to access Projects.");
+      navigate("/dashboard", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const [projects, setProjects] = useState([]);
   const [formData, setFormData] = useState(initialForm);

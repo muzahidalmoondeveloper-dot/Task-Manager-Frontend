@@ -13,6 +13,33 @@ function cx(...classes) {
   return classes.filter(Boolean).join(" ");
 }
 
+// Renders the current user's uploaded profile picture, falling back to the
+// initials it's laid over (via `fallback`, e.g. the parent's colored badge
+// with the initial already in it) if there's no picture or the image URL
+// fails to load — a stale/deleted avatar file never shows a broken-image
+// icon in either of the sidebar's two avatar spots.
+function UserAvatarImg({ src, alt, fallback }) {
+  const [broken, setBroken] = useState(false);
+  const [lastSrc, setLastSrc] = useState(src);
+  // A new src (fresh upload replacing a previously-broken one) deserves a
+  // fresh attempt rather than staying stuck on the last failure — adjusted
+  // during render rather than an effect, per React's guidance for resetting
+  // state when a prop changes.
+  if (src !== lastSrc) {
+    setLastSrc(src);
+    setBroken(false);
+  }
+  if (!src || broken) return fallback;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className="h-full w-full object-cover"
+      onError={() => setBroken(true)}
+    />
+  );
+}
+
 function getInitialTheme() {
   return localStorage.getItem(THEME_STORAGE_KEY) || "device";
 }
@@ -70,6 +97,16 @@ function UsersIcon() {
     <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
       <path d="M10 9a3 3 0 100-6 3 3 0 000 6z" />
       <path d="M3.465 14.493A6.98 6.98 0 0110 10a6.98 6.98 0 016.535 4.493.75.75 0 01-.699 1.007H4.164a.75.75 0 01-.699-1.007z" />
+    </svg>
+  );
+}
+
+function ActivityLogIcon() {
+  // Same clock glyph already used for Project Working Time — this app's
+  // established "time/activity" icon.
+  return (
+    <svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .27.144.518.378.653l3.5 2a.75.75 0 00.744-1.302L10.75 9.585V5z" clipRule="evenodd" />
     </svg>
   );
 }
@@ -573,8 +610,12 @@ function ProfileModule({
         {tab === "profile" ? (
           <div className="space-y-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-lg font-bold text-slate-700">
-                {(user?.full_name || user?.email || "U").charAt(0).toUpperCase()}
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-100 text-lg font-bold text-slate-700">
+                <UserAvatarImg
+                  src={resolveMediaUrl(user?.profile_picture_url)}
+                  alt=""
+                  fallback={(user?.full_name || user?.email || "U").charAt(0).toUpperCase()}
+                />
               </div>
 
               <div className="min-w-0">
@@ -683,12 +724,24 @@ function SidebarContent({
 
   const profileRef = useRef(null);
 
+  // Projects and Users are organization-wide administrative systems —
+  // Team Manager is a team-scoped role and must not see either nav item
+  // just by being a Team Manager (that previously let a plain Team
+  // Manager reach the org-wide Projects/Users management UI). A Team
+  // Manager who's *also* been separately granted Admin (`is_org_admin`)
+  // keeps full access via that flag, same as everywhere else in this app.
   const canManageProjects =
-    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   const canViewProjects = canManageProjects || user?.role === "project_manager";
 
   const canManageUsers =
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
+
+  // Scoreboard's own nav visibility is intentionally left untouched here
+  // (out of scope for this fix) — kept as its own variable so it can't
+  // silently change if canManageUsers's definition changes again later.
+  const canViewOrgScoreboard =
     user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
 
   const canManageTeams = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
@@ -936,7 +989,7 @@ function SidebarContent({
             </>
           )}
 
-          {canManageUsers ? (
+          {canViewOrgScoreboard ? (
             <NavItem
               to="/scoreboard"
               icon={<ScoreboardIcon />}
@@ -951,6 +1004,20 @@ function SidebarContent({
               to="/users"
               icon={<UsersIcon />}
               label="Users"
+              collapsed={collapsed}
+              onClick={handleClickNav}
+            />
+          ) : null}
+
+          {/* Same gate as Users — organization-wide activity is an
+              Owner/Admin surface, not a Team Manager/Project Manager one
+              (see app.core.tenant.require_org_admin, reused verbatim by
+              GET /activity-logs). */}
+          {canManageUsers ? (
+            <NavItem
+              to="/activity-log"
+              icon={<ActivityLogIcon />}
+              label="Activity Log"
               collapsed={collapsed}
               onClick={handleClickNav}
             />
@@ -1147,8 +1214,12 @@ function SidebarContent({
             collapsed && "justify-center px-2"
           )}
         >
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-500 text-sm font-bold text-white">
-            {sidebarAvatarText}
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-indigo-500 text-sm font-bold text-white">
+            <UserAvatarImg
+              src={resolveMediaUrl(user?.profile_picture_url)}
+              alt=""
+              fallback={sidebarAvatarText}
+            />
           </div>
 
           {!collapsed ? (

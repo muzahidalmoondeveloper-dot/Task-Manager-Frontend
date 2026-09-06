@@ -208,7 +208,7 @@ export default function ClientOnboardingsPage() {
                       <td className="px-4 py-4 align-middle">
                         <div className="flex items-center gap-2">
                           <div className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-100">
-                            <div className="h-full rounded-full bg-slate-900" style={{ width: `${r.progress_percentage}%` }} />
+                            <div className="brand-fill h-full rounded-full bg-slate-900" style={{ width: `${r.progress_percentage}%` }} />
                           </div>
                           <span className="text-xs text-slate-500">{r.progress_percentage}%</span>
                         </div>

@@ -8,6 +8,7 @@ import RegisterPage from "../pages/RegisterPage";
 import ForgotPasswordPage from "../pages/ForgotPasswordPage";
 import DashboardPage from "../pages/DashboardPage";
 import UsersPage from "../pages/UsersPage";
+import ActivityLogPage from "../pages/ActivityLogPage";
 import UserScoreboardPage from "../pages/UserScoreboardPage";
 import ClientTaskRequestsPage from "../pages/ClientTaskRequestsPage";
 import OrganizationScoreboardPage from "../pages/OrganizationScoreboardPage";
@@ -61,6 +62,7 @@ export default function AppRouter() {
             <Route path="/dashboard" element={<DashboardPage />} />
             <Route path="/profile" element={<ProfilePage />} />
             <Route path="/users" element={<UsersPage />} />
+            <Route path="/activity-log" element={<ActivityLogPage />} />
             <Route path="/users/:userId/scoreboard" element={<UserScoreboardPage />} />
             <Route path="/users/:userId/client-requests" element={<ClientTaskRequestsPage />} />
             <Route path="/meetings" element={<MeetingsPage />} />

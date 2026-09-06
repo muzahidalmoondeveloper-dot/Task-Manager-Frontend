@@ -4,6 +4,7 @@ import toast from "react-hot-toast";
 import { useAuth } from "../context/AuthContext";
 import { dashboardApi } from "../api/dashboardApi";
 import { integrationApi } from "../api/integrationApi";
+import { useNightMode } from "../hooks/useNightMode";
 
 const initialStats = {
   roleView: null,
@@ -147,6 +148,16 @@ function CumulativeLineChart({ data }) {
   const svgRef = useRef(null);
   const [hoveredIdx, setHoveredIdx] = useState(null);
   const [tooltip, setTooltip] = useState(null);
+  // Grid lines / axis / tick labels are drawn with inline SVG `stroke`/
+  // `fill` attributes, which no CSS selector (including index.css's
+  // `html.night` rules) can ever reach — they need their own dark-mode
+  // colors picked in JS. The data-series colors themselves (green
+  // line/bars/gradient) are left alone: they already read clearly on a
+  // dark card and are semantic, not surface, color.
+  const isNight = useNightMode();
+  const gridColor = isNight ? "#334155" : "#e2e8f0";
+  const gridColorFaint = isNight ? "#1e293b" : "#f1f5f9";
+  const axisTextColor = "#94a3b8"; // already legible on both a white and a dark card
 
   const SVG_W = 560, SVG_H = 250;
   const PAD = { l: 44, r: 20, t: 12, b: 34 };
@@ -208,7 +219,7 @@ function CumulativeLineChart({ data }) {
   if (!data.points.length) {
     return (
       <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
-        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50">
+        <div className={isNight ? "flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-950/40" : "flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-50"}>
           <svg className="h-6 w-6 text-emerald-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
           </svg>
@@ -235,20 +246,32 @@ function CumulativeLineChart({ data }) {
     <div className="relative w-full">
       {/* KPI strip */}
       <div className="mb-5 grid grid-cols-3 gap-3">
-        <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-600">This Week</p>
-          <p className="mt-1 text-2xl font-bold text-emerald-700">{data.maxCount}</p>
-          <p className="text-xs text-emerald-500">tasks completed</p>
+        <div
+          className={
+            isNight
+              ? "rounded-xl border border-emerald-800/60 bg-emerald-950/40 px-4 py-3"
+              : "rounded-xl border border-emerald-100 bg-emerald-50 px-4 py-3"
+          }
+        >
+          <p className={`text-[10px] font-bold uppercase tracking-widest ${isNight ? "text-emerald-400" : "text-emerald-600"}`}>This Week</p>
+          <p className={`mt-1 text-2xl font-bold ${isNight ? "text-emerald-300" : "text-emerald-700"}`}>{data.maxCount}</p>
+          <p className={`text-xs ${isNight ? "text-emerald-500" : "text-emerald-500"}`}>tasks completed</p>
         </div>
         <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
           <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">Best Day</p>
           <p className="mt-1 text-2xl font-bold text-slate-800">{bestDay}</p>
           <p className="text-xs text-slate-400">in a single day</p>
         </div>
-        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-blue-500">Daily Avg</p>
-          <p className="mt-1 text-2xl font-bold text-blue-700">{avgDaily}</p>
-          <p className="text-xs text-blue-400">tasks per day</p>
+        <div
+          className={
+            isNight
+              ? "rounded-xl border border-blue-800/60 bg-blue-950/40 px-4 py-3"
+              : "rounded-xl border border-blue-100 bg-blue-50 px-4 py-3"
+          }
+        >
+          <p className={`text-[10px] font-bold uppercase tracking-widest ${isNight ? "text-blue-400" : "text-blue-500"}`}>Daily Avg</p>
+          <p className={`mt-1 text-2xl font-bold ${isNight ? "text-blue-300" : "text-blue-700"}`}>{avgDaily}</p>
+          <p className={`text-xs ${isNight ? "text-blue-400" : "text-blue-400"}`}>tasks per day</p>
         </div>
       </div>
 
@@ -278,9 +301,9 @@ function CumulativeLineChart({ data }) {
           return (
             <g key={tick}>
               <line x1={PAD.l} y1={y} x2={PAD.l + W} y2={y}
-                stroke={tick === 0 ? "#e2e8f0" : "#f1f5f9"} strokeWidth="1" />
+                stroke={tick === 0 ? gridColor : gridColorFaint} strokeWidth="1" />
               <text x={PAD.l - 8} y={y + 4} textAnchor="end"
-                fill="#94a3b8" fontSize="11" fontFamily="system-ui,sans-serif">
+                fill={axisTextColor} fontSize="11" fontFamily="system-ui,sans-serif">
                 {tick}
               </text>
             </g>
@@ -311,12 +334,12 @@ function CumulativeLineChart({ data }) {
           strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
 
         {/* Y axis */}
-        <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t + H} stroke="#e2e8f0" strokeWidth="1" />
+        <line x1={PAD.l} y1={PAD.t} x2={PAD.l} y2={PAD.t + H} stroke={gridColor} strokeWidth="1" />
 
         {/* X labels */}
         {coords.map((c, i) => (
           <text key={i} x={c.x} y={SVG_H - 8}
-            textAnchor="middle" fill="#94a3b8"
+            textAnchor="middle" fill={axisTextColor}
             fontSize="10" fontFamily="system-ui,sans-serif">
             {fmtShort(c.date)}
           </text>
@@ -368,6 +391,12 @@ function PieChart({ segments }) {
   const wrapperRef = useRef(null);
   const [hoveredLabel, setHoveredLabel] = useState(null);
   const [tooltip, setTooltip] = useState(null);
+  // Same reasoning as CumulativeLineChart above — these are inline SVG
+  // colors, invisible to index.css's `html.night` rules, so they need a
+  // JS-level theme check. The segment colors passed in via `segments` are
+  // left untouched: they're the semantic Todo/In Progress/Pending
+  // Review/Done colors and already read clearly on a dark card.
+  const isNight = useNightMode();
 
   const total = segments.reduce((sum, s) => sum + s.value, 0);
   const cx = 85, cy = 85, outerR = 70, innerR = 42, POP = 8;
@@ -376,8 +405,8 @@ function PieChart({ segments }) {
     return (
       <div className="mt-4 flex justify-center">
         <svg width="170" height="170" viewBox="0 0 170 170">
-          <circle cx={cx} cy={cy} r={outerR} fill="#f1f5f9" />
-          <circle cx={cx} cy={cy} r={innerR} fill="white" />
+          <circle cx={cx} cy={cy} r={outerR} fill={isNight ? "#334155" : "#f1f5f9"} />
+          <circle cx={cx} cy={cy} r={innerR} fill={isNight ? "#0f172a" : "white"} />
           <text x={cx} y={cy + 5} textAnchor="middle" fill="#94a3b8" fontSize="12">
             No data
           </text>
@@ -465,7 +494,7 @@ function PieChart({ segments }) {
                 key={slice.label}
                 d={slice.path}
                 fill={slice.color}
-                stroke="white"
+                stroke={isNight ? "#0f172a" : "white"}
                 strokeWidth={isHov ? 1.5 : 2}
                 transform={`translate(${dx},${dy})`}
                 style={{ cursor: "pointer", transition: "transform 0.18s ease" }}
@@ -475,7 +504,7 @@ function PieChart({ segments }) {
               />
             );
           })}
-          <text x={cx} y={cy - 6} textAnchor="middle" fill="#0f172a" fontSize="22" fontWeight="700">
+          <text x={cx} y={cy - 6} textAnchor="middle" fill={isNight ? "#f8fafc" : "#0f172a"} fontSize="22" fontWeight="700">
             {total}
           </text>
           <text x={cx} y={cy + 13} textAnchor="middle" fill="#94a3b8" fontSize="11">
@@ -555,6 +584,18 @@ export default function DashboardPage() {
   const isTeamMember = stats.roleView === "team_member";
   const isAdminView = stats.roleView === "admin";
   const copy = ROLE_VIEW_COPY[stats.roleView] || ROLE_VIEW_COPY.team_member;
+
+  // The backend's role_view === "manager" bucket covers Team Manager AND
+  // Project Manager together (their dashboards share this branch), so it
+  // can't be used on its own to hide "My Projects" for Team Manager only —
+  // that would also hide it for a genuine Project Manager, which must keep
+  // working exactly as before. This checks the actual, explicit Project
+  // Manager capability (role or granted flag), matching the same check
+  // used throughout the rest of the app (e.g. has_project_manager_access
+  // on the backend) — a plain Team Manager (no PM capability) never
+  // satisfies this, a Project Manager (including a Team-Manager-who's-
+  // also-a-Project-Manager) always does.
+  const hasProjectManagerAccess = user?.role === "project_manager" || Boolean(user?.is_project_manager);
 
   const taskSummary = useMemo(() => {
     const total = stats.tasks.length;
@@ -741,7 +782,7 @@ export default function DashboardPage() {
               />
             )}
 
-            {!isAdminView && !isTeamMember && stats.projects.length > 0 && (
+            {!isAdminView && !isTeamMember && hasProjectManagerAccess && stats.projects.length > 0 && (
               <StatCard
                 title="My Projects"
                 value={stats.projects.length}
@@ -956,8 +997,12 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {!isAdminView && !isTeamMember && (stats.teams.length > 0 || stats.projects.length > 0) && (
-            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+          {!isAdminView && !isTeamMember && (stats.teams.length > 0 || (hasProjectManagerAccess && stats.projects.length > 0)) && (
+            <div
+              className={`mt-6 grid gap-6 ${
+                stats.teams.length > 0 && hasProjectManagerAccess && stats.projects.length > 0 ? "lg:grid-cols-2" : ""
+              }`}
+            >
               {stats.teams.length > 0 && (
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <h2 className="text-lg font-bold text-slate-900">{copy.teamsTitle}</h2>
@@ -974,7 +1019,13 @@ export default function DashboardPage() {
                 </section>
               )}
 
-              {stats.projects.length > 0 && (
+              {/* "My Projects" — Project Manager only (explicit capability,
+                  role or granted flag). A plain Team Manager never reaches
+                  this branch even when stats.projects is non-empty, per
+                  the "remove My Projects from the Team Manager Overview"
+                  requirement; a Team-Manager-who's-also-a-Project-Manager
+                  still sees it, unaffected. */}
+              {hasProjectManagerAccess && stats.projects.length > 0 && (
                 <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
                   <h2 className="text-lg font-bold text-slate-900">{copy.projectsTitle}</h2>
                   <div className="mt-5 space-y-3">

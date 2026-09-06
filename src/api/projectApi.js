@@ -13,6 +13,10 @@ export const projectApi = {
     return apiClient.get(`/projects/${id}/items`);
   },
 
+  getWorkingTime(id) {
+    return apiClient.get(`/projects/${id}/working-time`);
+  },
+
   create(payload) {
     return apiClient.post("/projects", payload);
   },

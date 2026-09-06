@@ -64,10 +64,6 @@ html.night body {
   color: #e2e8f0;
 }
 
-html.night .bg-slate-100 {
-  background-color: #020617;
-}
-
 html.night .bg-white {
   background-color: #0f172a;
 }
@@ -116,4 +112,324 @@ html.night textarea {
 html.night input::placeholder,
 html.night textarea::placeholder {
   color: #64748b;
+}
+
+/* ── Dark Mode: hover / focus / disabled coverage ─────────────────────────
+ * The base-state rules above only remap plain utility classes (e.g.
+ * `.bg-slate-100`, `.text-slate-800`). Tailwind compiles `hover:`, `focus:`
+ * and `disabled:` variants into their own distinct selectors
+ * (`.hover\:bg-slate-100:hover`, ...), which none of the rules above ever
+ * matched — so on hover, dark mode fell through to each utility's literal
+ * light-mode color. Worse, because an element keeps its *base* class too
+ * (e.g. `text-slate-600 hover:text-slate-900`), the always-on base night
+ * override and the hover-only Tailwind color tied in specificity and the
+ * base rule (declared later in this file) won the tie, leaving hover text
+ * exactly as light/dark as the resting state while the hover background
+ * popped back to its unmapped light literal — a near-invisible "light
+ * surface + light text" combo. These rules give the same slate scale a
+ * dark-mode hover/focus/disabled treatment, and give the brand-black
+ * `slate-900` border (active tab underline, focus ring, selection ring)
+ * a light equivalent so it doesn't vanish against a dark page background.
+ * `:not(.bg-slate-900)` excludes chips/pills that intentionally pair
+ * `border-slate-900` with `bg-slate-900` (an already-dark, theme-invariant
+ * selected state) from getting an unwanted light outline.
+ */
+
+html.night .disabled\:bg-slate-50:disabled {
+  background-color: #1e293b;
+}
+
+/* Ghost/outline/secondary action buttons — the "text-slate-700 border
+ * border-slate-200/300 hover:bg-slate-50" family used for every subtle
+ * header/toolbar/card action across the app (Add Task/Project/Team/User,
+ * Edit, Manage, dropdown-menu rows, filter chips, ...): originally mapped
+ * to the same #1e293b as the plain `bg-slate-100` surface class. That's
+ * only one step above a `bg-white` card (#0f172a) and, worse, identical to
+ * a card/panel that itself already sits on `bg-slate-100` — so on some
+ * cards the "hover" surface was indistinguishable from the button's own
+ * resting surface, and the button stopped reading as interactive. Raised
+ * to the same #334155 already used for `hover:bg-slate-200` (one solid
+ * step above every base night surface — bg-white/50/100 all resolve
+ * darker than this) so the hover state is unambiguous regardless of what
+ * card/panel the button happens to sit on, plus a 1px inset ring so the
+ * button's shape stays legible even where the fill delta alone is subtle
+ * (ghost buttons commonly have `border-transparent` or no border at all). */
+html.night .hover\:bg-slate-50:hover,
+html.night .hover\:bg-slate-100:hover,
+html.night .hover\:bg-slate-200:hover {
+  background-color: #334155;
+  box-shadow: inset 0 0 0 1px #475569;
+}
+
+html.night .hover\:text-slate-900:hover,
+html.night .hover\:text-slate-950:hover {
+  color: #f8fafc;
+}
+
+html.night .hover\:text-slate-600:hover,
+html.night .hover\:text-slate-700:hover,
+html.night .hover\:text-slate-800:hover {
+  color: #e2e8f0;
+}
+
+html.night .disabled\:text-slate-300:disabled,
+html.night .disabled\:text-slate-400:disabled,
+html.night .disabled\:text-slate-500:disabled {
+  color: #64748b;
+}
+
+html.night .border-slate-900:not(.bg-slate-900),
+html.night .hover\:border-slate-900:hover,
+html.night .focus\:border-slate-900:focus,
+html.night .focus-within\:border-slate-900:focus-within {
+  border-color: #f8fafc;
+}
+
+/* ── Dark Mode audit (round 2) ─────────────────────────────────────────── */
+
+/* `bg-slate-200` had no base mapping — avatar circles, count pills, the
+ * DatePicker's selected-day highlight, and various badges stayed literal
+ * light gray. One more step up the same staircase already used for
+ * bg-slate-50 (#111827) / bg-slate-100 (#1e293b). */
+html.night .bg-slate-200 {
+  background-color: #334155;
+}
+
+/* Shared <Select> component (components/Select.jsx). Its trigger button
+ * uses Tailwind's `!` important-modifier on purpose (so a caller's own
+ * className can't accidentally break its layout) — that `!important`
+ * beats the plain-specificity rules above outright, so without a matching
+ * `!important` here this one shared dropdown (used for every Status/
+ * Priority/filter/select across ~25 files app-wide) stayed a bright white
+ * box regardless of theme, exactly as the Tasks-page screenshot shows.
+ * Matching `!important` is the only way to win against the component's
+ * own `!important`, and is scoped to these four exact selectors only. */
+html.night .\!bg-white {
+  background-color: #0f172a !important;
+}
+html.night .\!border-slate-200 {
+  border-color: #334155 !important;
+}
+html.night .hover\:\!bg-slate-50:hover {
+  background-color: #334155 !important;
+}
+html.night .focus\:\!border-slate-400:focus {
+  border-color: #64748b !important;
+}
+
+/* Two more `!important`-forced spots found in the same audit, same reason
+ * as the <Select> block above (a matching `!important` is the only way to
+ * out-rank an existing `!important`):
+ *  - OrgSwitcher's non-current-org avatar forces `!text-slate-700` over the
+ *    OrgAvatar component's own default `text-white`; paired with our new
+ *    `bg-slate-200` mapping just above, that would otherwise land the
+ *    avatar's initials in the exact same color as its own background.
+ *  - CreateMeetingPage's inline transparent field forces
+ *    `hover:!bg-slate-100`, the same "unexplained white box on hover"
+ *    class of bug as the Select trigger.
+ */
+html.night .\!text-slate-700 {
+  color: #f8fafc !important;
+}
+html.night .hover\:\!bg-slate-100:hover {
+  /* This particular control (`!border-0 !bg-transparent`) has no border at
+   * all in its resting state, so the ring matters even more here than the
+   * plain-specificity ghost-button rule above — it's the only boundary cue
+   * this control gets. */
+  background-color: #334155 !important;
+  box-shadow: inset 0 0 0 1px #475569;
+}
+
+/* "Brand-black" fill accents (`bg-slate-900` with no `text-white` sibling
+ * to pair it with) — progress-bar fills and the DatePicker "today" dot.
+ * `bg-slate-900` itself is deliberately left unmapped globally: dozens of
+ * primary buttons and selected chips pair it with `text-white` and are
+ * already correct in both themes, and remapping the bare class would flip
+ * their background light while the (unmapped) white text stayed white,
+ * breaking them. These specific fills carry no text at all, so they need
+ * their own opt-in marker instead of a class-based global rule. */
+html.night .brand-fill {
+  background-color: #f8fafc;
+}
+
+/* Sticky/frosted app-shell headers (ClientLayout header, mobile sidebar
+ * header + drawer) use `bg-white/NN` + `backdrop-blur` as a translucent
+ * glass effect over whatever scrolls beneath them. Unmapped, that stayed a
+ * bright white glass pane floating over a dark page. Same alpha levels,
+ * dark surface color. */
+html.night .bg-white\/80 {
+  background-color: #0f172acc;
+}
+html.night .bg-white\/90 {
+  background-color: #0f172ae6;
+}
+html.night .bg-white\/95 {
+  background-color: #0f172af2;
+}
+
+/* Table-row hover/zebra tints and nested-panel tints: `bg-slate-50/NN` (and
+ * the chat toolbar's `bg-slate-200/70`) at a dozen-plus different opacity
+ * values across ~25 files — same literal light color, translucent, so it
+ * washes out as a stray light patch over a dark row/panel instead of the
+ * intended "subtly different from its surroundings" tint. Rather than
+ * enumerate every baked alpha-hex variant, match on the class substring
+ * Tailwind always emits for these utilities (attribute selectors match the
+ * raw class attribute text, so no CSS escaping is needed here) and supply
+ * one solid dark tint per interaction state instead of trying to preserve
+ * the exact translucency. `:hover`/`:nth-child(even)` are re-declared here
+ * because the substring match alone doesn't know which Tailwind variant it
+ * came from. */
+html.night [class*="hover:bg-slate-50/"]:hover,
+html.night [class*="hover:bg-slate-200/70"]:hover {
+  background-color: #1e293b;
+}
+html.night [class*="even:bg-slate-50/"]:nth-child(even) {
+  background-color: #1e293b;
+}
+html.night [class*="bg-slate-50/"]:not([class*="hover:bg-slate-50/"]):not([class*="even:bg-slate-50/"]) {
+  background-color: #111827;
+}
+
+/* ── Dark Mode audit (round 3): colored ghost/outline buttons ────────────
+ * The slate-family ghost-button fix above doesn't cover this app's other
+ * big shared pattern: `border-{hue}-200/300 text-{hue}-600/700
+ * hover:bg-{hue}-50` — the danger/warning/success/info outline-button
+ * family (delete/remove/decline, "Snooze", "Approve", chat quick-actions,
+ * ...), 100+ occurrences across red/amber/emerald/teal/indigo/blue. Same
+ * root cause as before: `hover:bg-{hue}-50/100` was never remapped, so it
+ * stayed a bright pastel pop-up on a dark page.
+ *
+ * Unlike the slate case, simply darkening the background isn't enough on
+ * its own here: these buttons' text is NOT hover-scoped (it's the same
+ * `text-{hue}-700` in both resting and hovered state), and that same class
+ * is *also* used elsewhere on purely static, non-interactive badges/pills
+ * that intentionally keep their pale light-mode surface in dark mode
+ * (reviewed separately — they're self-contained and already readable, so
+ * they were deliberately left alone). Brightening `text-{hue}-700`
+ * globally would fix the buttons but break those pills (light text on a
+ * pill whose pale background is deliberately untouched).
+ *
+ * So each rule below is scoped to fire only when BOTH the hover-background
+ * class and the matching text class are present on the same hovered
+ * element (exactly how the real buttons are written) — a plain static
+ * badge has no `hover:bg-*` class at all and never matches, so it's
+ * unaffected. `:hover` on a bare `.text-{hue}-700` selector only takes
+ * effect while that specific element is being hovered, so the resting
+ * state of every pill/badge is completely untouched either way.
+ */
+html.night .hover\:bg-red-50:hover.text-red-600,
+html.night .hover\:bg-red-100:hover.text-red-600 {
+  background-color: rgba(239, 68, 68, 0.18);
+}
+html.night .hover\:bg-red-200:hover.text-red-700 {
+  background-color: rgba(239, 68, 68, 0.3);
+}
+html.night .hover\:bg-amber-50:hover.text-amber-700,
+html.night .hover\:bg-amber-100:hover.text-amber-700 {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+}
+html.night .hover\:bg-emerald-50:hover.text-emerald-700,
+html.night .hover\:bg-emerald-100:hover.text-emerald-700 {
+  background-color: rgba(16, 185, 129, 0.18);
+  color: #6ee7b7;
+}
+html.night .hover\:bg-emerald-200:hover.text-emerald-700 {
+  background-color: rgba(16, 185, 129, 0.3);
+  color: #6ee7b7;
+}
+html.night .hover\:bg-indigo-100:hover.text-indigo-700,
+html.night .hover\:bg-indigo-100:hover.text-indigo-600 {
+  background-color: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+}
+html.night .hover\:bg-blue-50:hover.text-blue-700 {
+  background-color: rgba(59, 130, 246, 0.18);
+  color: #93c5fd;
+}
+/* This one has its own `hover:text-indigo-700` (darkens further on hover —
+ * a light-mode-only assumption); brighten it instead so it doesn't stack
+ * with a darkened hover background. */
+html.night .hover\:text-indigo-700:hover {
+  color: #a5b4fc;
+}
+/* `hover:bg-teal-50` here has no persistent `text-teal-*` class riding
+ * along (it's a bigger selectable list-row, not a small text/icon chip),
+ * so there's no badge-collision risk — safe to remap unconditionally. */
+html.night .hover\:bg-teal-50:hover {
+  background-color: rgba(20, 184, 166, 0.15);
+}
+/* `group-hover:` classes are inherently interactive-only (no static badge
+ * ever carries them), so these are safe to remap without the combined-
+ * selector guard above. */
+html.night .group:hover .group-hover\:bg-teal-100 {
+  background-color: rgba(20, 184, 166, 0.25);
+}
+html.night .group:hover .group-hover\:text-teal-700 {
+  color: #5eead4;
+}
+
+/* Red/amber/emerald/indigo/blue "700"/"600" text is left unmapped at the
+ * class level on purpose (see note above) — amber/emerald/indigo/blue
+ * already get a brighter hover-only color paired with their own
+ * hover-background rule right above. Red is the one hue in this family
+ * whose hover rule doesn't also restate `color`, because unlike the
+ * others `text-red-600` (#dc2626) already reads clearly against the new
+ * translucent red hover fill without needing to brighten further. */
+
+/* Colored text-links (`hover:underline`, or a colored clickable row using
+ * `hover:bg-slate-50`) — unlike a badge, a link's colored text sits
+ * directly on the page/card surface, not its own matching pale
+ * background, so darker hues (blue-600/700, teal-600, amber-700,
+ * indigo-600) that read fine on a pale badge lose contrast against a dark
+ * page. `hover:underline`/`hover:bg-slate-50` are only ever added to
+ * genuinely clickable text, so keying off them (instead of the bare hue
+ * class) leaves every static colored badge/stat number untouched. */
+/* `:not(:disabled)` guards each — one of these link buttons
+ * (components/AiChatButtons and similar) pairs its color class with
+ * `disabled:text-slate-300`; that rule and this one would otherwise tie in
+ * specificity and this later, unconditional one would win, keeping a
+ * disabled link bright instead of dimmed. */
+html.night .text-blue-700.hover\:underline:not(:disabled),
+html.night .text-blue-600.hover\:underline:not(:disabled),
+html.night .text-blue-700.hover\:bg-slate-50:not(:disabled) {
+  color: #93c5fd;
+}
+html.night .text-teal-600.hover\:underline:not(:disabled) {
+  color: #5eead4;
+}
+html.night .text-amber-700.hover\:underline:not(:disabled) {
+  color: #fcd34d;
+}
+html.night .text-indigo-600.hover\:underline:not(:disabled) {
+  color: #a5b4fc;
+}
+/* These two darken further on hover (`hover:text-teal-700` /
+ * `hover:text-indigo-600` /'s own sibling `hover:text-indigo-700` fixed
+ * earlier) — a light-mode-only assumption that actively fights
+ * readability once the base color above has already been brightened for
+ * dark mode. Brighten on hover instead of darkening. Safe unconditionally:
+ * both are hover-variant classes no static badge would ever carry. */
+html.night .hover\:text-teal-700:hover {
+  color: #5eead4;
+}
+html.night .hover\:text-indigo-600:hover {
+  color: #a5b4fc;
+}
+
+/* Solid black primary buttons (`bg-slate-900 text-white hover:bg-slate-700
+ * /800`, e.g. "+ Add Task") — by request, their Dark Mode hover now
+ * matches the ghost-button hover treatment above (raised #334155 surface +
+ * inset ring) instead of darkening further to slate-700/800, which read as
+ * too close to the button's own resting #0f172a-ish surface once night
+ * mode was involved. Every element carrying these hover classes already
+ * pairs them with `bg-slate-900 text-white` (verified — no other button
+ * family uses hover:bg-slate-700/800), so this is safe to apply
+ * unconditionally. Ghost buttons (e.g. the Overview page's Refresh
+ * button) are untouched — they still use the same #334155 hover they
+ * already had. */
+html.night .hover\:bg-slate-800:hover,
+html.night .hover\:bg-slate-700:hover {
+  background-color: #334155;
+  box-shadow: inset 0 0 0 1px #475569;
 }

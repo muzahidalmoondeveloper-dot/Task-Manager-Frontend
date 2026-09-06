@@ -401,7 +401,7 @@ export default function ClientProjectViewPage() {
           </div>
 
           <div className="mb-5 h-2 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-slate-900 transition-all" style={{ width: `${onboarding.progress_percentage}%` }} />
+            <div className="brand-fill h-full rounded-full bg-slate-900 transition-all" style={{ width: `${onboarding.progress_percentage}%` }} />
           </div>
 
           <ul className="space-y-2.5">

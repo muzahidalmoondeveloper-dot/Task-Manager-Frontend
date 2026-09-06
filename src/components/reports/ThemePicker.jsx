@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 
 import { reportApi } from "../../api/reportApi";
+import { useAuth } from "../../context/AuthContext";
 
 function ThemeSwatch({ theme, selected, onClick }) {
   return (
@@ -25,6 +26,14 @@ function ThemeSwatch({ theme, selected, onClick }) {
 }
 
 export default function ThemePicker({ reportId, selectedThemeId, onThemeApplied, disabled }) {
+  const { user } = useAuth();
+  // Saving a *new* custom theme (POST /reports/themes) is an organization-
+  // wide setting shared by every report, not a per-report edit — the
+  // backend now requires Owner/Admin for it specifically (unlike applying
+  // an existing preset to *this* report, which stays gated by the parent
+  // page's normal `disabled` prop). Team Manager must not see this enabled
+  // just because they can edit the report itself.
+  const isOrgAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
   const [themes, setThemes] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
   const [customColors, setCustomColors] = useState({
@@ -91,33 +100,35 @@ export default function ThemePicker({ reportId, selectedThemeId, onThemeApplied,
         </div>
       </div>
 
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-slate-700">Custom Colors</h3>
-        <div className="flex flex-wrap items-end gap-4">
-          {["primary_color", "accent_color", "secondary_color"].map((key) => (
-            <div key={key}>
-              <label className="mb-1 block text-xs font-medium capitalize text-slate-600">
-                {key.replace("_color", "").replace("_", " ")}
-              </label>
-              <input
-                type="color"
-                value={customColors[key]}
-                disabled={disabled}
-                onChange={(e) => setCustomColors((c) => ({ ...c, [key]: e.target.value }))}
-                className="h-10 w-14 cursor-pointer rounded border border-slate-300"
-              />
-            </div>
-          ))}
-          <button
-            type="button"
-            onClick={saveCustomTheme}
-            disabled={disabled}
-            className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
-          >
-            Save & Apply
-          </button>
+      {isOrgAdmin ? (
+        <div>
+          <h3 className="mb-3 text-sm font-semibold text-slate-700">Custom Colors</h3>
+          <div className="flex flex-wrap items-end gap-4">
+            {["primary_color", "accent_color", "secondary_color"].map((key) => (
+              <div key={key}>
+                <label className="mb-1 block text-xs font-medium capitalize text-slate-600">
+                  {key.replace("_color", "").replace("_", " ")}
+                </label>
+                <input
+                  type="color"
+                  value={customColors[key]}
+                  disabled={disabled}
+                  onChange={(e) => setCustomColors((c) => ({ ...c, [key]: e.target.value }))}
+                  className="h-10 w-14 cursor-pointer rounded border border-slate-300"
+                />
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={saveCustomTheme}
+              disabled={disabled}
+              className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+            >
+              Save & Apply
+            </button>
+          </div>
         </div>
-      </div>
+      ) : null}
     </div>
   );
 }
