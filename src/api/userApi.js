@@ -28,4 +28,14 @@ export const userApi = {
   changePassword(payload) {
     return apiClient.post("/users/me/change-password", payload);
   },
+
+  uploadProfilePicture(file) {
+    const formData = new FormData();
+    formData.append("file", file);
+    return apiClient.upload("/users/me/profile-picture", formData, "POST");
+  },
+
+  deleteProfilePicture() {
+    return apiClient.delete("/users/me/profile-picture");
+  },
 };

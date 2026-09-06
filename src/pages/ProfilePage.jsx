@@ -2,10 +2,17 @@ import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
+import { resolveMediaUrl } from "../api/client";
 import { useAuth } from "../context/AuthContext";
+import { useConfirm } from "../context/ConfirmContext";
 import { userApi } from "../api/userApi";
 
 const THEME_STORAGE_KEY = "atm-theme";
+// Same allowlist/limit the backend enforces (app/services/avatar_upload_service.py)
+// — checked here purely so the user gets instant feedback instead of a
+// round trip; the server re-validates regardless.
+const AVATAR_ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/webp"];
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 
 function formatRole(role) {
   return (role || "user").replace("_", " ");
@@ -104,6 +111,11 @@ function ThemeCard({ value, currentTheme, label, description, icon, onClick }) {
 
 export default function ProfilePage() {
   const { user, reloadUser } = useAuth();
+  const confirm = useConfirm();
+
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState(null);
+  const [avatarImgBroken, setAvatarImgBroken] = useState(false);
 
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = searchParams.get("tab") || "profile";
@@ -123,6 +135,53 @@ export default function ProfilePage() {
   const [passwordForm, setPasswordForm] = useState({ current_password: "", new_password: "", confirm_password: "" });
   const [passwordError, setPasswordError] = useState("");
   const [isSavingPassword, setIsSavingPassword] = useState(false);
+
+  async function handleAvatarFileChange(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file next time
+    if (!file || isUploadingAvatar) return;
+
+    if (!AVATAR_ACCEPTED_TYPES.includes(file.type)) {
+      toast.error("Profile picture must be a PNG, JPEG, or WEBP image.");
+      return;
+    }
+    if (file.size > AVATAR_MAX_BYTES) {
+      toast.error("Profile picture must be smaller than 5 MB.");
+      return;
+    }
+
+    const localPreviewUrl = URL.createObjectURL(file);
+    setAvatarPreview(localPreviewUrl);
+
+    try {
+      setIsUploadingAvatar(true);
+      await userApi.uploadProfilePicture(file);
+      await reloadUser();
+      setAvatarImgBroken(false);
+      toast.success("Profile picture updated.");
+    } catch (err) {
+      toast.error(err.message || "Failed to upload profile picture.");
+    } finally {
+      setIsUploadingAvatar(false);
+      URL.revokeObjectURL(localPreviewUrl);
+      setAvatarPreview(null);
+    }
+  }
+
+  async function handleRemoveAvatar() {
+    const ok = await confirm({ message: "Remove your profile picture?", tone: "danger", confirmLabel: "Remove" });
+    if (!ok || isUploadingAvatar) return;
+    try {
+      setIsUploadingAvatar(true);
+      await userApi.deleteProfilePicture();
+      await reloadUser();
+      toast.success("Profile picture removed.");
+    } catch (err) {
+      toast.error(err.message || "Failed to remove profile picture.");
+    } finally {
+      setIsUploadingAvatar(false);
+    }
+  }
 
   function openEditModal() {
     setEditForm({ full_name: user?.full_name || "", email: user?.email || "" });
@@ -219,8 +278,57 @@ export default function ProfilePage() {
         <div className="border-b border-slate-200 px-6 py-6">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
-              <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-3xl bg-slate-900 text-2xl font-bold text-white">
-                {getInitials(user)}
+              <div className="group relative shrink-0">
+                <label
+                  htmlFor="profile-avatar-input"
+                  className="flex h-20 w-20 cursor-pointer items-center justify-center overflow-hidden rounded-3xl bg-slate-900 text-2xl font-bold text-white"
+                  title="Change profile picture"
+                >
+                  {(avatarPreview || user?.profile_picture_url) && !avatarImgBroken ? (
+                    <img
+                      key={avatarPreview || user.profile_picture_url}
+                      src={avatarPreview || resolveMediaUrl(user.profile_picture_url)}
+                      alt={`${user?.full_name || "User"}'s profile picture`}
+                      className="h-full w-full object-cover"
+                      onError={() => setAvatarImgBroken(true)}
+                    />
+                  ) : (
+                    getInitials(user)
+                  )}
+
+                  <span className="absolute inset-0 flex items-center justify-center rounded-3xl bg-slate-950/0 text-transparent transition-colors group-hover:bg-slate-950/50 group-hover:text-white">
+                    {isUploadingAvatar ? (
+                      <span className="text-[10px] font-semibold">Uploading…</span>
+                    ) : (
+                      <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M2 5.5A1.5 1.5 0 013.5 4h2.379a1.5 1.5 0 001.06-.44l.122-.12A2.5 2.5 0 018.939 3h2.122a2.5 2.5 0 011.878.44l.122.12a1.5 1.5 0 001.06.44H16.5A1.5 1.5 0 0118 5.5v9a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 012 14.5v-9zM10 7a3.5 3.5 0 100 7 3.5 3.5 0 000-7z" />
+                      </svg>
+                    )}
+                  </span>
+                </label>
+
+                <input
+                  id="profile-avatar-input"
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={handleAvatarFileChange}
+                  disabled={isUploadingAvatar}
+                  className="hidden"
+                />
+
+                {user?.profile_picture_url && (
+                  <button
+                    type="button"
+                    onClick={handleRemoveAvatar}
+                    disabled={isUploadingAvatar}
+                    title="Remove profile picture"
+                    className="absolute -right-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-sm hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
+                      <path d="M6.28 5.22a.75.75 0 00-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 101.06 1.06L10 11.06l3.72 3.72a.75.75 0 101.06-1.06L11.06 10l3.72-3.72a.75.75 0 00-1.06-1.06L10 8.94 6.28 5.22z" />
+                    </svg>
+                  </button>
+                )}
               </div>
 
               <div className="min-w-0">

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 
 import { notificationApi } from "../../api/notificationApi";
 import { useAuth } from "../../context/AuthContext";
+import { timeAgo } from "../../utils/timeAgo";
 
 const TYPE_META = {
   task_assigned:            { icon: "📋", label: "Assigned"      },
@@ -15,15 +16,6 @@ const TYPE_META = {
   task_request_approved:    { icon: "✅", label: "Request Approved" },
   task_request_rejected:    { icon: "🚫", label: "Request Declined" },
 };
-
-function timeAgo(dateStr) {
-  if (!dateStr) return "";
-  const diff = Math.floor((Date.now() - new Date(dateStr).getTime()) / 1000);
-  if (diff < 60) return "just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
 
 function BellIcon({ className }) {
   return (

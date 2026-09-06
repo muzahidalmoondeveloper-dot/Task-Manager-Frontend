@@ -1,13 +1,19 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "/api";
 
-// Uploaded/static files (e.g. project logos) are served from the backend's
-// `/media` path, which sits outside the `/api` prefix. When the frontend and
-// backend share an origin (the default), a plain relative path just works;
-// when `VITE_API_BASE_URL` points at a separately-hosted backend, derive
-// that backend's origin so media URLs resolve correctly instead of against
-// the frontend's own origin.
+// Uploaded/static files (e.g. avatars, project/organization logos) are
+// either served from the backend's own `/media` path (local dev/test
+// storage, outside the `/api` prefix) or, in production, are a stable
+// absolute URL pointing directly at durable object storage (S3-compatible
+// — see backend/MEDIA_STORAGE.md). An already-absolute URL must always be
+// returned untouched — it never needs (and must never get) the backend
+// origin prefixed onto it, regardless of how VITE_API_BASE_URL is set, or
+// it turns into a broken `https://api.example.com/https://bucket.s3.../x`
+// URL. Only a relative `/media/...` path (local backend, or a legacy
+// not-yet-migrated DB row) is resolved against the backend's own origin
+// when the frontend and backend are on separate origins.
 export function resolveMediaUrl(path) {
   if (!path) return null;
+  if (/^https?:\/\//i.test(path)) return path;
   if (/^https?:\/\//i.test(API_BASE_URL)) {
     return `${new URL(API_BASE_URL).origin}${path}`;
   }

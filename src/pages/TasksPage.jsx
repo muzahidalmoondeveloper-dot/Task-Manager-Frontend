@@ -12,7 +12,10 @@ import { useConfirm, usePrompt } from "../context/ConfirmContext";
 import { usePageContext } from "../context/PageContext";
 import CelebrationOverlay from "../components/CelebrationOverlay";
 import DatePicker from "../components/DatePicker";
+import TaskTimeTracker from "../components/TaskTimeTracker";
+import WorkingTimeCell from "../components/WorkingTimeCell";
 import { getDueRowClassName } from "../utils/taskDueStatus";
+import { filterOrgAssignableUsers, getInlineAssigneeOptions } from "../utils/taskAssignees";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -37,6 +40,7 @@ const PRIORITY_OPTIONS = [
 
 const initialForm = {
   name: "",
+  description: "",
   start_date: "",
   due_date: "",
   assignee_id: "",
@@ -135,7 +139,7 @@ function toDateInputValue(d) {
 
 // ─── Task card for mobile ─────────────────────────────────────────────────────
 
-function TaskCard({ task, canManageTasks, isTeamMember, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId }) {
+function TaskCard({ task, canManageTasks, isTeamMember, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
   const overdue = isOverdue(task);
 
   return (
@@ -173,6 +177,19 @@ function TaskCard({ task, canManageTasks, isTeamMember, user, onEdit, onDelete, 
           ) : "—"}
         </p>
       </div>
+
+      <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+        <span className="font-medium">Working Time:</span>
+        <WorkingTimeCell
+          taskId={task.id}
+          workingTimeSeconds={workingTime?.working_time_seconds}
+          activeTimerCount={workingTime?.active_timer_count}
+          currentUserIsActive={Boolean(workingTime?.current_user_is_active)}
+          currentUserHasActiveTimerElsewhere={currentUserHasActiveTimer && !workingTime?.current_user_is_active}
+          canControlTimer={task.assignee_id != null && task.assignee_id === user?.id}
+          onTimeChange={onTimeChange}
+        />
+      </p>
 
       {/* Actions */}
       {canManageTasks && task.status === "pending_review" ? (
@@ -293,6 +310,11 @@ function TaskTableRow({
   onApprove,
   onAssignBack,
   onToggleMenu,
+  workingTime,
+  currentUserHasActiveTimer,
+  onTimeChange,
+  assignableUsersByTeamId,
+  assignableUsersLoading,
 }) {
   const canChange = canManageTasks || (
     isTeamMember &&
@@ -351,11 +373,31 @@ function TaskTableRow({
       {/* Assignee */}
       <td className="px-4 py-4 align-middle text-slate-700">
         {canManageTasks ? (
-          <Select value={task.assignee_id || ""} onChange={(e) => onQuickAssignee(task, e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none">
-            <option value="">Unassigned</option>
-            {assignees.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
-          </Select>
+          (() => {
+            // Inline-assignee-dropdown bug-fix follow-up: Team eligibility
+            // wins whenever this Task belongs to a Team (never the
+            // org-wide `assignees` list) — sourced from the bulk
+            // assignable-users lookup the parent already fetched for
+            // every distinct team_id on screen, never a per-row fetch.
+            const resolvedOptions = getInlineAssigneeOptions(task, { assignableUsersByTeamId, orgWideUsers: assignees });
+            const stillLoadingThisTeam = task.team_id != null && resolvedOptions === undefined && assignableUsersLoading;
+            const options = resolvedOptions ?? [];
+            if (stillLoadingThisTeam) {
+              return (
+                <Select value="" disabled
+                  className="rounded-lg border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm text-slate-400">
+                  <option value="">Loading members…</option>
+                </Select>
+              );
+            }
+            return (
+              <Select value={task.assignee_id || ""} onChange={(e) => onQuickAssignee(task, e.target.value)}
+                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none">
+                <option value="">Unassigned</option>
+                {options.map((a) => <option key={a.id} value={a.id}>{a.full_name}</option>)}
+              </Select>
+            );
+          })()
         ) : (
           task.assignee?.full_name || "—"
         )}
@@ -385,6 +427,19 @@ function TaskTableRow({
         ) : (
           <StatusBadge status={task.status} />
         )}
+      </td>
+
+      {/* Working Time */}
+      <td className="px-4 py-4 align-middle">
+        <WorkingTimeCell
+          taskId={task.id}
+          workingTimeSeconds={workingTime?.working_time_seconds}
+          activeTimerCount={workingTime?.active_timer_count}
+          currentUserIsActive={Boolean(workingTime?.current_user_is_active)}
+          currentUserHasActiveTimerElsewhere={currentUserHasActiveTimer && !workingTime?.current_user_is_active}
+          canControlTimer={task.assignee_id != null && task.assignee_id === userId}
+          onTimeChange={onTimeChange}
+        />
       </td>
 
       {/* Actions */}
@@ -539,6 +594,33 @@ export default function TasksPage() {
     }
   }
 
+  // Bulk Working Time for both task tables on this page — ONE request per
+  // refresh for however many tasks are currently loaded across My Tasks +
+  // All Tasks combined, never one `/tasks/{id}/time` per row.
+  const [taskWorkingTimes, setTaskWorkingTimes] = useState({});
+  // #7A allows only ONE active timer per user across the whole org — this
+  // tracks whether the CALLER already has one running anywhere, so every
+  // OTHER row's Start button can be disabled (Start/Stop-from-list
+  // follow-up). Per-row "is it MY timer" always comes from each item's
+  // own `current_user_is_active`, never from `active_timer_count` (which
+  // describes the task aggregate and may be > 0 purely from other users).
+  const [currentUserHasActiveTimer, setCurrentUserHasActiveTimer] = useState(false);
+  async function refreshTaskWorkingTimes() {
+    const ids = Array.from(new Set([...myTasks.map((t) => t.id), ...allTasks.map((t) => t.id)]));
+    if (!ids.length) {
+      setTaskWorkingTimes({});
+      setCurrentUserHasActiveTimer(false);
+      return;
+    }
+    try {
+      const data = await taskApi.getTimeSummaries(ids);
+      setTaskWorkingTimes(data.items || {});
+      setCurrentUserHasActiveTimer(Boolean(data.current_user_has_active_timer));
+    } catch {
+      // Working Time is a secondary metric on this list — leave it as-is.
+    }
+  }
+
   useEffect(() => {
     loadMyTasks();
     if (canManageTasks) {
@@ -546,6 +628,11 @@ export default function TasksPage() {
       loadFilterData();
     }
   }, []);  // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    refreshTaskWorkingTimes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [myTasks, allTasks]);
 
   // ─── Filter logic ───────────────────────────────────────────────────────────
 
@@ -633,7 +720,70 @@ export default function TasksPage() {
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
   }, [allTasks, teams]);
 
-  const assignees = useMemo(() => users.filter((u) => ["owner", "admin", "team_manager", "team_member"].includes(u.role)), [users]);
+  // Rule F fallback (Task Assignee bug-fix follow-up): eligible assignees
+  // when the Task being created/edited has no team_id — org-wide, minus
+  // Client (see utils/taskAssignees.js, the same helper TasksPage,
+  // ProjectDetailPage, and TeamDetailPage all share instead of each
+  // re-implementing their own role allowlist).
+  const assignees = useMemo(() => filterOrgAssignableUsers(users), [users]);
+
+  // Task Assignee bug-fix follow-up (Rule B/C): once a Team is picked in
+  // the Create/Edit Task modal, the Assignee dropdown must be scoped to
+  // THAT team's eligible members only — never the whole organization,
+  // regardless of the viewer being Owner/Admin/Team Manager. Fetched via
+  // the same team-scoped `GET /teams/{id}/assignable-users` TeamDetailPage
+  // uses, not the org-wide user list above.
+  const [teamAssignableUsers, setTeamAssignableUsers] = useState([]);
+  useEffect(() => {
+    const teamId = formData.team_id;
+    Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
+      .then((members) => setTeamAssignableUsers(Array.isArray(members) ? members : []))
+      .catch(() => setTeamAssignableUsers([]));
+  }, [formData.team_id]);
+
+  // The dropdown's actual option source: Team eligibility wins whenever a
+  // team is selected (Rule B/C precedence), org-wide list otherwise.
+  const modalAssignees = formData.team_id ? teamAssignableUsers : assignees;
+
+  // Inline-assignee-dropdown bug-fix follow-up: the INLINE quick-assignee
+  // `<Select>` in the "All Tasks" table (unlike the Create/Edit modal
+  // above, which only ever has one team_id active at a time) needs
+  // options for however many DISTINCT teams are represented across every
+  // currently-visible Team Task — ONE bulk request for all of them,
+  // never one `getAssignableUsers()` call per row and never one per
+  // unique team either. `assignableUsersByTeamId` stays keyed by team id
+  // (as a string, matching the API's JSON keys) so each row looks up
+  // only its own task.team_id's list — Technology Team tasks never see
+  // Marketing's members and vice versa (see utils/taskAssignees.js's
+  // getInlineAssigneeOptions()).
+  const [assignableUsersByTeamId, setAssignableUsersByTeamId] = useState({});
+  const [assignableUsersLoading, setAssignableUsersLoading] = useState(false);
+  const visibleTeamIds = useMemo(() => {
+    const ids = new Set();
+    for (const t of myTasks) if (t.team_id != null) ids.add(t.team_id);
+    for (const t of allTasks) if (t.team_id != null) ids.add(t.team_id);
+    return Array.from(ids).sort((a, b) => a - b);
+  }, [myTasks, allTasks]);
+  const visibleTeamIdsKey = visibleTeamIds.join(",");
+
+  useEffect(() => {
+    Promise.resolve().then(async () => {
+      if (!visibleTeamIds.length) {
+        setAssignableUsersByTeamId({});
+        return;
+      }
+      setAssignableUsersLoading(true);
+      try {
+        const data = await teamApi.getAssignableUsersBulk(visibleTeamIds);
+        setAssignableUsersByTeamId(data?.teams || {});
+      } catch {
+        setAssignableUsersByTeamId({});
+      } finally {
+        setAssignableUsersLoading(false);
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTeamIdsKey]);
 
   // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -694,6 +844,7 @@ export default function TasksPage() {
     setEditingTaskId(task.id);
     setFormData({
       name:        task.name || "",
+      description: task.description || "",
       start_date:  task.start_date || "",
       due_date:    task.due_date || "",
       assignee_id: task.assignee_id ? String(task.assignee_id) : "",
@@ -716,6 +867,7 @@ export default function TasksPage() {
     try {
       const payload = {
         name:        formData.name,
+        description: formData.description || null,
         start_date:  formData.start_date || null,
         due_date:    formData.due_date   || null,
         // Leave unassigned to land the task in the team's To-Do list instead.
@@ -971,7 +1123,7 @@ export default function TasksPage() {
                   {/* Desktop table */}
                   <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[1100px] text-sm">
+                      <table className="w-full min-w-[1220px] text-sm">
                         <thead className="bg-slate-50">
                           <tr className="border-b border-slate-200">
                             <th className="w-10 px-4 py-3" />
@@ -982,6 +1134,7 @@ export default function TasksPage() {
                             <th className="px-4 py-3 text-left font-semibold text-slate-700">Start Date</th>
                             <th className="px-4 py-3 text-left font-semibold text-slate-700">Due Date</th>
                             <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                            <th className="px-4 py-3 text-left font-semibold text-slate-700">Working Time</th>
                             <th className="px-4 py-3 text-right font-semibold text-slate-700">Actions</th>
                           </tr>
                         </thead>
@@ -1032,6 +1185,17 @@ export default function TasksPage() {
                                   <StatusBadge status={task.status} />
                                 )}
                               </td>
+                              <td className="px-4 py-4 align-middle">
+                                <WorkingTimeCell
+                                  taskId={task.id}
+                                  workingTimeSeconds={taskWorkingTimes[task.id]?.working_time_seconds}
+                                  activeTimerCount={taskWorkingTimes[task.id]?.active_timer_count}
+                                  currentUserIsActive={Boolean(taskWorkingTimes[task.id]?.current_user_is_active)}
+                                  currentUserHasActiveTimerElsewhere={currentUserHasActiveTimer && !taskWorkingTimes[task.id]?.current_user_is_active}
+                                  canControlTimer={task.assignee_id != null && task.assignee_id === user?.id}
+                                  onTimeChange={refreshTaskWorkingTimes}
+                                />
+                              </td>
                               <td className="px-4 py-4 text-right align-middle">
                                 {canManageTasks && (
                                   task.status === "pending_review" ? (
@@ -1056,7 +1220,7 @@ export default function TasksPage() {
                             </tr>
                           )) : (
                             <tr>
-                              <td colSpan={9}>
+                              <td colSpan={10}>
                                 <EmptyState message={myFiltersActive ? "No tasks match your filters." : "No tasks assigned to you yet."} />
                               </td>
                             </tr>
@@ -1079,6 +1243,9 @@ export default function TasksPage() {
                         onApprove={approveTask}
                         onAssignBack={assignBackTask}
                         reviewActionTaskId={reviewActionId}
+                        workingTime={taskWorkingTimes[task.id]}
+                        currentUserHasActiveTimer={currentUserHasActiveTimer}
+                        onTimeChange={refreshTaskWorkingTimes}
                       />
                     )) : (
                       <EmptyState message={myFiltersActive ? "No tasks match your filters." : "No tasks assigned to you yet."} />
@@ -1284,7 +1451,7 @@ export default function TasksPage() {
                   {/* Desktop table */}
                   <div className="hidden overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm md:block">
                     <div className="overflow-x-auto">
-                      <table className="w-full min-w-[1100px] text-sm">
+                      <table className="w-full min-w-[1220px] text-sm">
                         <thead className="bg-slate-50">
                           <tr className="border-b border-slate-200">
                             <th className="w-10 px-4 py-3" />
@@ -1296,6 +1463,7 @@ export default function TasksPage() {
                             <th className="px-4 py-3 text-left font-semibold text-slate-700">Start Date</th>
                             <th className="px-4 py-3 text-left font-semibold text-slate-700">Due Date</th>
                             <th className="px-4 py-3 text-left font-semibold text-slate-700">Status</th>
+                            <th className="px-4 py-3 text-left font-semibold text-slate-700">Working Time</th>
                             <th className="px-4 py-3 text-right font-semibold text-slate-700">Actions</th>
                           </tr>
                         </thead>
@@ -1315,10 +1483,15 @@ export default function TasksPage() {
                               onApprove={approveTask}
                               onAssignBack={assignBackTask}
                               onToggleMenu={handleMenuToggle}
+                              workingTime={taskWorkingTimes[task.id]}
+                              currentUserHasActiveTimer={currentUserHasActiveTimer}
+                              onTimeChange={refreshTaskWorkingTimes}
+                              assignableUsersByTeamId={assignableUsersByTeamId}
+                              assignableUsersLoading={assignableUsersLoading}
                             />
                           )) : (
                             <tr>
-                              <td colSpan={10}>
+                              <td colSpan={11}>
                                 <EmptyState message={allFiltersActive ? "No tasks match your filters." : "No tasks yet. Create one above."} />
                               </td>
                             </tr>
@@ -1343,6 +1516,9 @@ export default function TasksPage() {
                         onApprove={approveTask}
                         onAssignBack={assignBackTask}
                         reviewActionTaskId={reviewActionId}
+                        workingTime={taskWorkingTimes[task.id]}
+                        currentUserHasActiveTimer={currentUserHasActiveTimer}
+                        onTimeChange={refreshTaskWorkingTimes}
                       />
                     )) : (
                       <EmptyState message={allFiltersActive ? "No tasks match your filters." : "No tasks yet."} />
@@ -1531,6 +1707,17 @@ export default function TasksPage() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
               </div>
 
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea name="description" value={formData.description} onChange={handleChange}
+                  rows={4} placeholder="Add task details..."
+                  className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400" />
+              </div>
+
+              {/* Time tracking only applies to a task that already exists —
+                  nothing to start a timer on until Create Task is saved. */}
+              {isEditing && <TaskTimeTracker taskId={editingTaskId} onTimeChange={refreshTaskWorkingTimes} />}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
@@ -1573,9 +1760,9 @@ export default function TasksPage() {
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   >
                     <option value="">Unassigned</option>
-                    {assignees.map((a) => (
+                    {modalAssignees.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.id === user?.id ? "Assign to me" : `${a.full_name} — ${a.role}`}
+                        {a.id === user?.id ? "Assign to me" : a.role ? `${a.full_name} — ${a.role}` : a.full_name}
                       </option>
                     ))}
                   </Select>

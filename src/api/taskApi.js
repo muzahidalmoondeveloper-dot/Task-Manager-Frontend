@@ -54,4 +54,30 @@ export const taskApi = {
   delete(id) {
     return apiClient.delete(`/tasks/${id}`);
   },
+
+  // Time tracking (Task #7A foundation) — server-authoritative; the
+  // client never supplies a duration or timestamp.
+  getTimeState(taskId) {
+    return apiClient.get(`/tasks/${taskId}/time`);
+  },
+
+  startTimer(taskId) {
+    return apiClient.post(`/tasks/${taskId}/time/start`);
+  },
+
+  stopTimer(taskId) {
+    return apiClient.post(`/tasks/${taskId}/time/stop`);
+  },
+
+  // Bulk Working Time for a Task list/table/card view — ONE request for
+  // however many tasks are visible, never one getTimeState() per row.
+  // Returns { calculated_at, items: { [taskId]: { working_time_seconds,
+  // active_timer_count } } } — a task_id the caller can't see (or that
+  // doesn't exist) is simply absent from `items`, not an error.
+  getTimeSummaries(taskIds) {
+    if (!taskIds || taskIds.length === 0) {
+      return Promise.resolve({ calculated_at: new Date().toISOString(), items: {} });
+    }
+    return apiClient.post("/tasks/time-summaries", { task_ids: taskIds });
+  },
 };

@@ -228,6 +228,14 @@ export default function MeetingDetailPage() {
   const [todoTeamPickerOpen, setTodoTeamPickerOpen] = useState(false);
   const [pickedTeamId, setPickedTeamId] = useState("");
   const [todoModalTeam, setTodoModalTeam] = useState(null);
+  // Task Assignee bug-fix follow-up: the To-Do modal's Assignee dropdown
+  // must be scoped to the PICKED team's eligible members (Client always
+  // excluded), never the org-wide `orgUsers` list below — which is still
+  // used, unchanged, by the other section modals (KPI/Rock/News/Issue)
+  // that aren't Task-assignment surfaces. Loaded via the same team-scoped
+  // authorization as the team itself, so this works for a Team Manager
+  // picking their own managed team too, with no org-wide Users access.
+  const [todoAssignableUsers, setTodoAssignableUsers] = useState([]);
   const [saving, setSaving] = useState(false);
   // Freshly-created items, kept here and passed down so each section shows
   // the new item immediately without a page refresh.
@@ -241,6 +249,13 @@ export default function MeetingDetailPage() {
     teamApi.list().then(setTeams).catch(() => setTeams([]));
     userApi.list().then(setOrgUsers).catch(() => setOrgUsers([]));
   }, []);
+
+  useEffect(() => {
+    const teamId = todoModalTeam?.id;
+    Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
+      .then((members) => setTodoAssignableUsers(Array.isArray(members) ? members : []))
+      .catch(() => setTodoAssignableUsers([]));
+  }, [todoModalTeam?.id]);
 
   useEffect(() => {
     meetingApi.get(meetingId)
@@ -548,7 +563,7 @@ export default function MeetingDetailPage() {
           onClose={() => setOpenModal(null)} onSave={saveIssue} saving={saving} />
       )}
       {openModal === "todo" && todoModalTeam && (
-        <CreateTodoModal team={todoModalTeam} users={orgUsers}
+        <CreateTodoModal team={todoModalTeam} users={todoAssignableUsers}
           onClose={() => { setOpenModal(null); setTodoModalTeam(null); }} onSave={saveTodo} saving={saving} />
       )}
     </div>

@@ -7,6 +7,8 @@ import LinkedItemsHoverIcon from "../components/LinkedItemsHoverIcon";
 import EntityDetailPanel from "../components/EntityDetailPanel";
 import DatePicker from "../components/DatePicker";
 import CelebrationOverlay from "../components/CelebrationOverlay";
+import TaskTimeTracker from "../components/TaskTimeTracker";
+import WorkingTimeCell from "../components/WorkingTimeCell";
 import IconPickerButton from "../components/IconPicker.jsx";
 import { RockIconDisplay } from "../utils/rockIcons.jsx";
 import { getDueRowClassName } from "../utils/taskDueStatus";
@@ -831,8 +833,9 @@ const TEAM_PAGE_TABS = [
   { id: "scoreboard", label: "Scoreboard" },
 ];
 
-export function CreateTodoModal({ team, users, editing, onClose, onSave, saving }) {
+export function CreateTodoModal({ team, users, editing, onClose, onSave, saving, onTimeChange }) {
   const [name, setName] = useState(editing?.name || "");
+  const [description, setDescription] = useState(editing?.description || "");
   const [icon, setIcon] = useState(editing?.icon || null);
   const [assigneeId, setAssigneeId] = useState(
     editing?.assignee_id ? String(editing.assignee_id) : editing?.assignee?.id ? String(editing.assignee.id) : ""
@@ -847,6 +850,7 @@ export function CreateTodoModal({ team, users, editing, onClose, onSave, saving 
     if (!name.trim()) return;
     onSave({
       name: name.trim(),
+      description: description.trim() || null,
       icon,
       assignee_id: assigneeId ? Number(assigneeId) : null,
       start_date: startDate || null,
@@ -889,6 +893,22 @@ export function CreateTodoModal({ team, users, editing, onClose, onSave, saving 
                 />
               </div>
             </div>
+
+            {/* Description */}
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-500">Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Add task details..."
+                rows={3}
+                className="w-full resize-y rounded-xl border border-slate-200 px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-slate-400 focus:outline-none"
+              />
+            </div>
+
+            {/* Time tracking only applies to a to-do that already exists —
+                nothing to start a timer on until Create To-Do is saved. */}
+            {editing && <TaskTimeTracker taskId={editing.id} onTimeChange={onTimeChange} />}
 
             {/* Assignee */}
             <div>
@@ -1075,23 +1095,55 @@ export default function TeamDetailPage() {
     loadData();
   }, [teamId]);
 
-  useEffect(() => {
-    if (!canManageTasks) return;
-    userApi.list()
-      .then((u) => setTodoUsers(Array.isArray(u) ? u : []))
-      .catch(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canManageTasks]);
-
-  async function openTodoModal(task = null) {
-    if (todoUsers.length === 0) {
-      try {
-        const u = await userApi.list();
-        setTodoUsers(Array.isArray(u) ? u : []);
-      } catch {
-        setTodoUsers([]);
-      }
+  // Bulk Working Time for this team's task table — ONE request for
+  // however many tasks this team has, never one `/tasks/{id}/time` per
+  // row (Task List Working Time follow-up). Reuses the same TaskTimeEntry
+  // summary data as TasksPage/ProjectDetail — no separate Team Working
+  // Time subsystem.
+  const [taskWorkingTimes, setTaskWorkingTimes] = useState({});
+  // #7A allows only ONE active timer per user across the whole org — this
+  // tracks whether the CALLER already has one running anywhere, so every
+  // OTHER row's Start button can be disabled (Start/Stop-from-list
+  // follow-up). Per-row "is it MY timer" always comes from each item's
+  // own `current_user_is_active`, never from `active_timer_count`.
+  const [currentUserHasActiveTimer, setCurrentUserHasActiveTimer] = useState(false);
+  async function refreshTaskWorkingTimes() {
+    if (!tasks.length) {
+      setTaskWorkingTimes({});
+      setCurrentUserHasActiveTimer(false);
+      return;
     }
+    try {
+      const data = await taskApi.getTimeSummaries(tasks.map((t) => t.id));
+      setTaskWorkingTimes(data.items || {});
+      setCurrentUserHasActiveTimer(Boolean(data.current_user_has_active_timer));
+    } catch {
+      // Working Time is a secondary metric here — leave it as-is.
+    }
+  }
+
+  useEffect(() => {
+    refreshTaskWorkingTimes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks]);
+
+  // Task Assignee bug-fix follow-up: the To-Do Assignee dropdown must be
+  // scoped to THIS team's eligible members, not the whole organization —
+  // and, critically, must work identically for every role including a
+  // Team Manager, who does NOT have (and must not be granted) org-wide
+  // `GET /users` access. `GET /teams/{id}/assignable-users` uses the
+  // exact same team-scoped authorization as `GET /teams/{id}` itself
+  // (Owner/Admin: any team; anyone else: only a team they manage or
+  // belong to), so this loads correctly for Owner, Admin, AND Team
+  // Manager alike — no `if (isAdmin) loadUsers() else []` branching.
+  useEffect(() => {
+    if (!teamId) return;
+    teamApi.getAssignableUsers(teamId)
+      .then((members) => setTodoUsers(Array.isArray(members) ? members : []))
+      .catch(() => setTodoUsers([]));
+  }, [teamId]);
+
+  function openTodoModal(task = null) {
     setEditingTodo(task);
     setShowTodoModal(true);
   }
@@ -1278,7 +1330,7 @@ export default function TeamDetailPage() {
             )}
           </div>
           <div className="overflow-x-auto xl:overflow-visible">
-            <table className="w-full min-w-[1000px] text-sm xl:min-w-0">
+            <table className="w-full min-w-[1120px] text-sm xl:min-w-0">
               <thead className="bg-slate-50">
                 <tr className="border-b border-slate-200">
                   <th className="w-12 px-4 py-3 text-left font-semibold text-slate-700" />
@@ -1309,6 +1361,10 @@ export default function TeamDetailPage() {
 
                   <th className="min-w-40 px-4 py-3 text-left font-semibold text-slate-700">
                     Status
+                  </th>
+
+                  <th className="min-w-36 px-4 py-3 text-left font-semibold text-slate-700">
+                    Working Time
                   </th>
 
                   {canManageTasks && (
@@ -1433,6 +1489,18 @@ export default function TeamDetailPage() {
                         )}
                       </td>
 
+                      <td className="px-4 py-4 align-middle">
+                        <WorkingTimeCell
+                          taskId={task.id}
+                          workingTimeSeconds={taskWorkingTimes[task.id]?.working_time_seconds}
+                          activeTimerCount={taskWorkingTimes[task.id]?.active_timer_count}
+                          currentUserIsActive={Boolean(taskWorkingTimes[task.id]?.current_user_is_active)}
+                          currentUserHasActiveTimerElsewhere={currentUserHasActiveTimer && !taskWorkingTimes[task.id]?.current_user_is_active}
+                          canControlTimer={task.assignee_id != null && task.assignee_id === user?.id}
+                          onTimeChange={refreshTaskWorkingTimes}
+                        />
+                      </td>
+
                       {canManageTasks && (
                         <td className="px-4 py-4 align-middle">
                           <div className="flex items-center gap-1">
@@ -1463,7 +1531,7 @@ export default function TeamDetailPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={canManageTasks ? 9 : 8} className="px-4 py-16 text-center">
+                    <td colSpan={canManageTasks ? 10 : 9} className="px-4 py-16 text-center">
                       <div className="flex flex-col items-center">
                         <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                           <svg className="h-6 w-6" viewBox="0 0 20 20" fill="currentColor">
@@ -1496,6 +1564,7 @@ export default function TeamDetailPage() {
           onClose={() => { setShowTodoModal(false); setEditingTodo(null); }}
           onSave={handleSaveTodo}
           saving={todoSaving}
+          onTimeChange={refreshTaskWorkingTimes}
         />
       )}
 

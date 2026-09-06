@@ -481,6 +481,22 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     userApi.list().then(setOrgUsers).catch(() => {});
   }, [canManage]);
 
+  // Task Assignee bug-fix follow-up: the To-Do modal's Assignee dropdown
+  // must be scoped to the PICKED team's eligible members (Client always
+  // excluded), never `orgUsers` above (which stays org-wide, unchanged,
+  // for adding meeting participants and the Issue/News modals — neither
+  // of those is a Task-assignment surface). Loaded via the same
+  // team-scoped authorization as the team itself, so this works for a
+  // Team Manager picking their own managed team too, with no org-wide
+  // Users access required.
+  const [todoAssignableUsers, setTodoAssignableUsers] = useState([]);
+  useEffect(() => {
+    const teamId = todoModalTeam?.id;
+    Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
+      .then((members) => setTodoAssignableUsers(Array.isArray(members) ? members : []))
+      .catch(() => setTodoAssignableUsers([]));
+  }, [todoModalTeam?.id]);
+
   // Near-real-time sync: while this panel is open, poll for changes made by
   // anyone else viewing the same meeting (attendance, speaking order, agenda,
   // notes, decisions), so updates don't require a manual page refresh. No
@@ -1101,7 +1117,7 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
         {todoModalOpen && todoModalTeam && (
           <CreateTodoModal
             team={todoModalTeam}
-            users={orgUsers}
+            users={todoAssignableUsers}
             onClose={() => { setTodoModalOpen(false); setTodoModalTeam(null); }}
             onSave={saveTodoFromMeeting}
             saving={todoSaving}

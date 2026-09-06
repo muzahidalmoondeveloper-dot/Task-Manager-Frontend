@@ -15,9 +15,14 @@ import { issueApi } from "../api/issueApi";
 import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
 import DatePicker from "../components/DatePicker";
+import TaskTimeTracker from "../components/TaskTimeTracker";
+import WorkingTimeCell from "../components/WorkingTimeCell";
+import { formatDurationSeconds, formatLiveDurationSeconds } from "../utils/duration";
+import { useLiveDuration } from "../hooks/useLiveDuration";
 import StartOnboardingModal from "../components/onboarding/StartOnboardingModal";
 import InvitationsTable from "../components/onboarding/InvitationsTable";
 import { getDueRowClassName } from "../utils/taskDueStatus";
+import { filterOrgAssignableUsers, getInlineAssigneeOptions } from "../utils/taskAssignees";
 
 const TASK_REQUEST_STATUS_BADGE = {
   pending: "bg-amber-100 text-amber-700",
@@ -77,6 +82,7 @@ function getProjectInitials(name) {
 
 const initialForm = {
   name: "",
+  description: "",
   start_date: "",
   due_date: "",
   assignee_id: "",
@@ -151,6 +157,16 @@ export default function ProjectDetailPage() {
 
   const [project, setProject] = useState(null);
   const [tasks, setTasks] = useState([]);
+  // Project Working Time (#7B) — a self-contained aggregate loaded
+  // independently of the rest of Project Detail (see loadWorkingTime),
+  // so a failure here never blanks out the rest of the page. Live display
+  // while any timer is active is display-only ticking off the server's
+  // own baseline+timestamp; a fresh loadWorkingTime() call always resets
+  // it to the authoritative value.
+  const [workingTimeSummary, setWorkingTimeSummary] = useState(null);
+  // Per-task Working Time for the "list" tab's task table — keyed by task
+  // id, populated in bulk (never one request per row; see refreshTaskWorkingTimes).
+  const [taskWorkingTimes, setTaskWorkingTimes] = useState({});
   const [users, setUsers] = useState([]);
   const [teams, setTeams] = useState([]);
   const [reports, setReports] = useState([]);
@@ -253,23 +269,75 @@ export default function ProjectDetailPage() {
     }
   }
 
-  const assignees = useMemo(() => {
-    return users.filter((item) =>
-      ["owner", "admin", "team_manager", "team_member"].includes(item.role)
-    );
-  }, [users]);
+  // Rule F fallback (Task Assignee bug-fix follow-up): eligible assignees
+  // when the Task being edited has no team_id — org-wide, minus Client
+  // (see utils/taskAssignees.js, shared with TasksPage/TeamDetailPage
+  // instead of a separately-maintained role allowlist here).
+  const assignees = useMemo(() => filterOrgAssignableUsers(users), [users]);
 
-  const projectMembers = useMemo(() => {
-    const map = new Map();
+  // Task Assignee bug-fix follow-up (Rule B/C): once a Team is picked in
+  // the Edit Task modal, the Assignee dropdown must be scoped to THAT
+  // team's eligible members only — never the whole organization, and
+  // never widened by Admin/Owner/Team-Manager privilege. Fetched via the
+  // same team-scoped `GET /teams/{id}/assignable-users` TeamDetailPage
+  // uses.
+  const [teamAssignableUsers, setTeamAssignableUsers] = useState([]);
+  useEffect(() => {
+    const teamId = formData.team_id;
+    Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
+      .then((members) => setTeamAssignableUsers(Array.isArray(members) ? members : []))
+      .catch(() => setTeamAssignableUsers([]));
+  }, [formData.team_id]);
 
-    tasks.forEach((task) => {
-      if (task.assignee) {
-        map.set(task.assignee.id, task.assignee);
+  // The dropdown's actual option source: Team eligibility wins whenever a
+  // team is selected (Rule B/C precedence), org-wide list otherwise.
+  const modalAssignees = formData.team_id ? teamAssignableUsers : assignees;
+
+  // Same Team-scoping, independently, for the Task Request -> Task
+  // conversion form below (`convertForm`) — its own Team field is always
+  // required, so this is always a Team Task once submitted.
+  const [convertTeamAssignableUsers, setConvertTeamAssignableUsers] = useState([]);
+  useEffect(() => {
+    const teamId = convertForm.team_id;
+    Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
+      .then((members) => setConvertTeamAssignableUsers(Array.isArray(members) ? members : []))
+      .catch(() => setConvertTeamAssignableUsers([]));
+  }, [convertForm.team_id]);
+
+  // Inline-assignee-dropdown bug-fix follow-up: the INLINE quick-assignee
+  // `<Select>` in the project's task table needs options for however
+  // many DISTINCT teams are represented across the project's currently
+  // loaded tasks — ONE bulk request for all of them, never one per row
+  // and never one per unique team either. Keyed by team id (string,
+  // matching the API's JSON keys) so a Technology Team task's row never
+  // sees Marketing's members, even within the same project.
+  const [assignableUsersByTeamId, setAssignableUsersByTeamId] = useState({});
+  const [assignableUsersLoading, setAssignableUsersLoading] = useState(false);
+  const visibleTeamIds = useMemo(() => {
+    const ids = new Set();
+    for (const t of tasks) if (t.team_id != null) ids.add(t.team_id);
+    return Array.from(ids).sort((a, b) => a - b);
+  }, [tasks]);
+  const visibleTeamIdsKey = visibleTeamIds.join(",");
+
+  useEffect(() => {
+    Promise.resolve().then(async () => {
+      if (!visibleTeamIds.length) {
+        setAssignableUsersByTeamId({});
+        return;
+      }
+      setAssignableUsersLoading(true);
+      try {
+        const data = await teamApi.getAssignableUsersBulk(visibleTeamIds);
+        setAssignableUsersByTeamId(data?.teams || {});
+      } catch {
+        setAssignableUsersByTeamId({});
+      } finally {
+        setAssignableUsersLoading(false);
       }
     });
-
-    return Array.from(map.values());
-  }, [tasks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleTeamIdsKey]);
 
   const groupedByStatus = useMemo(() => {
     return STATUS_OPTIONS.reduce((acc, status) => {
@@ -365,6 +433,72 @@ export default function ProjectDetailPage() {
       setIsLoading(false);
     }
   }
+
+  // Deliberately independent of loadData()'s Promise.all — a Working Time
+  // failure (e.g. a client without project access) must never blank out
+  // the rest of Project Detail, matching how the optional users/teams
+  // requests above already degrade gracefully rather than sink everything.
+  async function loadWorkingTime() {
+    try {
+      const data = await projectApi.getWorkingTime(projectId);
+      setWorkingTimeSummary(data);
+    } catch {
+      // Silently leave the stat card at its zero/loading state — this is a
+      // secondary metric, not core Project Detail data.
+    }
+  }
+
+  useEffect(() => {
+    if (!projectId) return;
+    loadWorkingTime();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
+  // Display-only ticking while one or more timers are active in this
+  // project — shared baseline+monotonic-elapsed hook (Task List Working
+  // Time follow-up), reconstructed from the server's own authoritative
+  // values, never persisted. A fresh loadWorkingTime() (e.g. via
+  // TaskTimeTracker's onTimeChange after Start/Stop) always replaces the
+  // baseline with the authoritative value.
+  const displayWorkingTimeSeconds = useLiveDuration(
+    workingTimeSummary?.working_time_seconds ?? 0,
+    workingTimeSummary?.active_timer_count ?? 0
+  );
+
+  // Bulk Working Time for the "list" tab's task table — ONE request for
+  // every task currently loaded on this page, never one per row (Task
+  // List Working Time follow-up). Independent of loadData()/loadWorkingTime()
+  // so a failure here never blanks out the rest of Project Detail.
+  // #7A allows only ONE active timer per user across the whole org — this
+  // tracks whether the CALLER (never another user) already has one
+  // running, so every OTHER row's Start button can be disabled instead of
+  // letting the user discover a 409 only after clicking (Start/Stop-from-
+  // list follow-up). Per-row "is it MY timer" comes from each item's own
+  // `current_user_is_active` — never from `active_timer_count`, which
+  // describes the task aggregate and may be > 0 purely because another
+  // user is timing it.
+  const [currentUserHasActiveTimer, setCurrentUserHasActiveTimer] = useState(false);
+
+  async function refreshTaskWorkingTimes() {
+    if (!tasks.length) {
+      setTaskWorkingTimes({});
+      setCurrentUserHasActiveTimer(false);
+      return;
+    }
+    try {
+      const data = await taskApi.getTimeSummaries(tasks.map((t) => t.id));
+      setTaskWorkingTimes(data.items || {});
+      setCurrentUserHasActiveTimer(Boolean(data.current_user_has_active_timer));
+    } catch {
+      // Leave whatever was last successfully loaded (or the zero-state) —
+      // Working Time is a secondary metric on this list, not core data.
+    }
+  }
+
+  useEffect(() => {
+    refreshTaskWorkingTimes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks]);
 
   useEffect(() => {
     loadData();
@@ -636,6 +770,7 @@ export default function ProjectDetailPage() {
 
     setFormData({
       name: task.name || "",
+      description: task.description || "",
       start_date: task.start_date || "",
       due_date: task.due_date || "",
       assignee_id: task.assignee_id ? String(task.assignee_id) : "",
@@ -660,6 +795,7 @@ export default function ProjectDetailPage() {
 
       const payload = {
         name: formData.name,
+        description: formData.description || null,
         start_date: formData.start_date || null,
         due_date: formData.due_date || null,
         // New tasks are created unassigned; assignment happens later (edit).
@@ -983,14 +1119,24 @@ export default function ProjectDetailPage() {
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium text-slate-500">Members</p>
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
-                    <svg className="h-4 w-4 text-slate-600" viewBox="0 0 20 20" fill="currentColor">
-                      <path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z" />
+                  <p className="text-sm font-medium text-slate-500">Working Time</p>
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-50">
+                    <svg className="h-4 w-4 text-amber-600" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-13a.75.75 0 00-1.5 0v5c0 .27.144.518.378.653l3.5 2a.75.75 0 00.744-1.302L10.75 9.585V5z" clipRule="evenodd" />
                     </svg>
                   </div>
                 </div>
-                <p className="mt-3 text-3xl font-bold text-slate-900">{projectMembers.length}</p>
+                <p className={workingTimeSummary?.active_timer_count > 0 ? "mt-3 font-mono text-3xl font-bold text-slate-900" : "mt-3 text-3xl font-bold text-slate-900"}>
+                  {workingTimeSummary?.active_timer_count > 0
+                    ? formatLiveDurationSeconds(displayWorkingTimeSeconds)
+                    : formatDurationSeconds(displayWorkingTimeSeconds)}
+                </p>
+                {workingTimeSummary?.active_timer_count > 0 && (
+                  <p className="mt-1 flex items-center gap-1.5 text-xs text-slate-500">
+                    <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+                    {workingTimeSummary.active_timer_count} timer{workingTimeSummary.active_timer_count === 1 ? "" : "s"} running
+                  </p>
+                )}
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -1468,26 +1614,6 @@ export default function ProjectDetailPage() {
               )}
             </div>
 
-            {/* ── Project Members ── */}
-            {projectMembers.length > 0 && (
-              <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-                <h2 className="text-base font-semibold text-slate-900">Project Members</h2>
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {projectMembers.map((member) => (
-                    <span
-                      key={member.id}
-                      className="flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700"
-                    >
-                      <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-slate-300 text-[10px] font-bold text-slate-700">
-                        {member.full_name?.charAt(0) || "?"}
-                      </span>
-                      {member.full_name}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-
             {/* ── Client invitations (staff only) ── */}
             {canCreateTasks ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -1515,7 +1641,7 @@ export default function ProjectDetailPage() {
         {activeTab === "list" ? (
           <section className="overflow-visible rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="overflow-x-auto xl:overflow-visible">
-              <table className="w-full min-w-[1000px] text-sm xl:min-w-0">
+              <table className="w-full min-w-[1120px] text-sm xl:min-w-0">
                 <thead className="bg-slate-50">
                   <tr className="border-b border-slate-200">
                     <th className="w-12 px-4 py-3 text-left font-semibold text-slate-700" />
@@ -1546,6 +1672,10 @@ export default function ProjectDetailPage() {
 
                     <th className="min-w-40 px-4 py-3 text-left font-semibold text-slate-700">
                       Status
+                    </th>
+
+                    <th className="min-w-36 px-4 py-3 text-left font-semibold text-slate-700">
+                      Working Time
                     </th>
 
                     {canManageTasks ? (
@@ -1613,18 +1743,37 @@ export default function ProjectDetailPage() {
                         </td>
 
                         <td className="px-4 py-4 align-middle text-slate-700">
-                          {canManageTasks ? (
-                            <Select
-                              value={task.assignee_id || ""}
-                              onChange={(event) => quickAssigneeUpdate(task, event.target.value)}
-                              className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none"
-                            >
-                              <option value="">Unassigned</option>
-                              {assignees.map((assignee) => (
-                                <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>
-                              ))}
-                            </Select>
-                          ) : (
+                          {canManageTasks ? (() => {
+                            // Inline-assignee-dropdown bug-fix follow-up:
+                            // Team eligibility wins whenever this Task
+                            // belongs to a Team — sourced from the bulk
+                            // lookup fetched once for every distinct
+                            // team_id on this project's task table, never
+                            // a per-row fetch.
+                            const resolvedOptions = getInlineAssigneeOptions(task, { assignableUsersByTeamId, orgWideUsers: assignees });
+                            const stillLoadingThisTeam = task.team_id != null && resolvedOptions === undefined && assignableUsersLoading;
+                            const options = resolvedOptions ?? [];
+                            if (stillLoadingThisTeam) {
+                              return (
+                                <Select value="" disabled
+                                  className="rounded-lg border border-slate-300 bg-slate-50 px-2 py-1.5 text-sm text-slate-400">
+                                  <option value="">Loading members…</option>
+                                </Select>
+                              );
+                            }
+                            return (
+                              <Select
+                                value={task.assignee_id || ""}
+                                onChange={(event) => quickAssigneeUpdate(task, event.target.value)}
+                                className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-700 focus:border-slate-900 focus:outline-none"
+                              >
+                                <option value="">Unassigned</option>
+                                {options.map((assignee) => (
+                                  <option key={assignee.id} value={assignee.id}>{assignee.full_name}</option>
+                                ))}
+                              </Select>
+                            );
+                          })() : (
                             task.assignee?.full_name || "—"
                           )}
                         </td>
@@ -1664,6 +1813,18 @@ export default function ProjectDetailPage() {
                               {getStatusLabel(task.status)}
                             </span>
                           )}
+                        </td>
+
+                        <td className="px-4 py-4 align-middle">
+                          <WorkingTimeCell
+                            taskId={task.id}
+                            workingTimeSeconds={taskWorkingTimes[task.id]?.working_time_seconds}
+                            activeTimerCount={taskWorkingTimes[task.id]?.active_timer_count}
+                            currentUserIsActive={Boolean(taskWorkingTimes[task.id]?.current_user_is_active)}
+                            currentUserHasActiveTimerElsewhere={currentUserHasActiveTimer && !taskWorkingTimes[task.id]?.current_user_is_active}
+                            canControlTimer={task.assignee_id != null && task.assignee_id === user?.id}
+                            onTimeChange={() => { refreshTaskWorkingTimes(); loadWorkingTime(); }}
+                          />
                         </td>
 
                         {canManageTasks ? (
@@ -1709,7 +1870,7 @@ export default function ProjectDetailPage() {
                   ) : (
                     <tr>
                       <td
-                        colSpan={canManageTasks ? 9 : 8}
+                        colSpan={canManageTasks ? 10 : 9}
                         className="px-4 py-8 text-center text-sm text-slate-500"
                       >
                         No tasks found in this project.
@@ -2082,6 +2243,33 @@ export default function ProjectDetailPage() {
                 />
               </div>
 
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Description
+                </label>
+
+                <textarea
+                  name="description"
+                  value={formData.description}
+                  onChange={handleChange}
+                  rows={4}
+                  placeholder="Add task details..."
+                  className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Time tracking only applies to a task that already exists —
+                  nothing to start a timer on until Create Task is saved. */}
+              {isEditing && (
+                <TaskTimeTracker
+                  taskId={editingTaskId}
+                  onTimeChange={() => {
+                    loadWorkingTime();
+                    refreshTaskWorkingTimes();
+                  }}
+                />
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">
@@ -2116,9 +2304,9 @@ export default function ProjectDetailPage() {
                   >
                     <option value="">Select assignee</option>
 
-                    {assignees.map((assignee) => (
+                    {modalAssignees.map((assignee) => (
                       <option key={assignee.id} value={assignee.id}>
-                        {assignee.full_name} — {assignee.role}
+                        {assignee.role ? `${assignee.full_name} — ${assignee.role}` : assignee.full_name}
                       </option>
                     ))}
                   </Select>
@@ -2393,9 +2581,9 @@ export default function ProjectDetailPage() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option value="">Unassigned</option>
-                  {assignees.map((assignee) => (
+                  {convertTeamAssignableUsers.map((assignee) => (
                     <option key={assignee.id} value={assignee.id}>
-                      {assignee.full_name} — {assignee.role}
+                      {assignee.role ? `${assignee.full_name} — ${assignee.role}` : assignee.full_name}
                     </option>
                   ))}
                 </Select>
