@@ -487,6 +487,20 @@ export default function TasksPage() {
   const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
   const isTeamMember   = user?.role === "team_member";
 
+  // Project Manager "All Tasks" follow-up: mirrors the backend's
+  // `TenantContext.has_project_manager_access` exactly (base role OR the
+  // granted `is_project_manager` flag) — the same condition
+  // `require_org_manager_or_project_manager` now uses to admit a plain
+  // Project Manager into GET /tasks. Deliberately kept SEPARATE from
+  // `canManageTasks` above: a plain Project Manager may now VIEW the
+  // All Tasks tab (server-side scoped to their managed projects), but
+  // backend task mutation routes (update/delete/approve/assign-back) are
+  // still `require_org_manager`-gated and do NOT include Project Manager
+  // — so `canManageTasks` must stay exactly as it was, or PM would see
+  // inline edit/delete/status/assignee controls that 403 on click.
+  const hasProjectManagerAccess = user?.role === "project_manager" || Boolean(user?.is_project_manager);
+  const canViewAllTasksTab = canManageTasks || hasProjectManagerAccess;
+
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Primary view tab
@@ -580,18 +594,25 @@ export default function TasksPage() {
   }
 
   async function loadFilterData() {
-    try {
-      const [userData, projectData, teamData] = await Promise.all([
-        userApi.list(),
-        projectApi.list(),
-        teamApi.list(),
-      ]);
-      setUsers(userData);
-      setProjects(projectData);
-      setTeams(teamData);
-    } catch {
-      // non-critical
-    }
+    // Project Manager "All Tasks" follow-up: GET /users (userApi.list()) is
+    // require_org_admin-gated — a plain Project Manager doesn't have (and
+    // must not be given) org-wide Users access, so it's never called for
+    // them at all here (Phase 14 — never fall back to organization-wide
+    // Users). GET /projects and GET /teams are already correctly scoped
+    // server-side for a Project Manager (project membership / managed
+    // team respectively), so those still load normally.
+    //
+    // Settled independently (never Promise.all) so one endpoint a role
+    // isn't permitted to call can't also blank out the Project/Team
+    // filter options this role DOES have legitimate access to.
+    const [userResult, projectResult, teamResult] = await Promise.allSettled([
+      canManageTasks ? userApi.list() : Promise.resolve([]),
+      projectApi.list(),
+      teamApi.list(),
+    ]);
+    if (userResult.status === "fulfilled") setUsers(userResult.value);
+    if (projectResult.status === "fulfilled") setProjects(projectResult.value);
+    if (teamResult.status === "fulfilled") setTeams(teamResult.value);
   }
 
   // Bulk Working Time for both task tables on this page — ONE request per
@@ -623,7 +644,7 @@ export default function TasksPage() {
 
   useEffect(() => {
     loadMyTasks();
-    if (canManageTasks) {
+    if (canViewAllTasksTab) {
       loadAllTasks();
       loadFilterData();
     }
@@ -995,6 +1016,15 @@ export default function TasksPage() {
     allFilters.assignee !== "all" || allFilters.project !== "all" || allFilters.team !== "all" ||
     allFilters.overdue || allFilters.dueDateFrom || allFilters.dueDateTo;
 
+  // Project Manager "All Tasks" follow-up (Phase 20): a plain Project
+  // Manager's All Tasks empty state should read as project-scoped, not
+  // the generic Owner/Admin/Team Manager "create one" copy (a PM has no
+  // Add Task entry point on this tab), and never My Tasks' "assigned to
+  // you" wording either.
+  const allTasksEmptyMessage = allFiltersActive
+    ? "No tasks match your filters."
+    : (canManageTasks ? "No tasks yet. Create one above." : "No tasks found in your projects.");
+
   // ─── Menu helpers ────────────────────────────────────────────────────────────
 
   function handleMenuToggle(e, taskId) {
@@ -1025,7 +1055,7 @@ export default function TasksPage() {
 
   const primaryTabs = [
     { key: "my_tasks",  label: "My Tasks"  },
-    ...(canManageTasks ? [{ key: "all_tasks", label: "All Tasks" }] : []),
+    ...(canViewAllTasksTab ? [{ key: "all_tasks", label: "All Tasks" }] : []),
   ];
 
   const viewModes = [
@@ -1366,7 +1396,7 @@ export default function TasksPage() {
       )}
 
       {/* ── ALL TASKS ────────────────────────────────────────────────────────── */}
-      {primaryTab === "all_tasks" && canManageTasks && (
+      {primaryTab === "all_tasks" && canViewAllTasksTab && (
         <>
           {/* View mode toggle (List / Board / Calendar) */}
           <div className="mb-5 flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm w-fit">
@@ -1492,7 +1522,7 @@ export default function TasksPage() {
                           )) : (
                             <tr>
                               <td colSpan={11}>
-                                <EmptyState message={allFiltersActive ? "No tasks match your filters." : "No tasks yet. Create one above."} />
+                                <EmptyState message={allTasksEmptyMessage} />
                               </td>
                             </tr>
                           )}
@@ -1521,7 +1551,7 @@ export default function TasksPage() {
                         onTimeChange={refreshTaskWorkingTimes}
                       />
                     )) : (
-                      <EmptyState message={allFiltersActive ? "No tasks match your filters." : "No tasks yet."} />
+                      <EmptyState message={allTasksEmptyMessage} />
                     )}
                   </div>
                 </>

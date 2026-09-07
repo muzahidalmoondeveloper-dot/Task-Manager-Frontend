@@ -30,12 +30,21 @@ export default function AcceptInvitationPage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token");
   const navigate = useNavigate();
-  const { isAuthenticated, isAuthLoading, loginWithToken } = useAuth();
+  const { isAuthenticated, isAuthLoading, loginWithToken, logout } = useAuth();
 
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [accepting, setAccepting] = useState(false);
+  // Invitation identity-mismatch fix: distinct from `error` above (which
+  // means the invitation itself is unusable — invalid/expired/revoked).
+  // This means the invitation is perfectly valid, but the CURRENTLY
+  // LOGGED-IN account is not who it was sent to (backend
+  // INVITATION_ACCOUNT_MISMATCH, 409) — a dedicated state so this never
+  // gets mistaken for, or overwritten by, a generic failure toast, and
+  // the page can offer the correct next action (sign out and continue)
+  // instead of just "try again".
+  const [accountMismatch, setAccountMismatch] = useState(false);
 
   const [setupForm, setSetupForm] = useState({ full_name: "", password: "", confirm_password: "" });
   const [isSettingUp, setIsSettingUp] = useState(false);
@@ -62,13 +71,38 @@ export default function AcceptInvitationPage() {
     try {
       setAccepting(true);
       const response = await invitationApi.accept(token);
+      // Success here means the backend has already durably created/
+      // confirmed the intended OrganizationMembership and marked the
+      // invitation accepted (see POST /auth/accept-invitation) — this UI
+      // never declares success on its own say-so.
       loginWithToken(response.access_token, response.user, null, response.refresh_token);
       toast.success(`You've joined ${preview?.organization_name || "the organization"}!`);
       navigate(redirectPathForRole(response.user?.role, preview?.project_id), { replace: true });
     } catch (err) {
+      if (err.code === "INVITATION_ACCOUNT_MISMATCH") {
+        // Identity conflict, not a normal failure — the invitation itself
+        // is still perfectly valid and untouched (still pending) — show
+        // the dedicated mismatch state instead of a generic error toast.
+        setAccountMismatch(true);
+        setAccepting(false);
+        return;
+      }
       toast.error(err.message || "Failed to accept invitation.");
       setAccepting(false);
     }
+  }
+
+  // Sign out and continue (Phase B12): the invitation token already lives
+  // in this page's own URL query string — nothing extra to preserve in
+  // storage/navigation state. Signing out here is the SAME client-side
+  // logout the rest of the app already uses (Sidebar's own Log out
+  // button) — not a new mechanism. After it clears the session, this same
+  // page re-renders in its already-correct unauthenticated branch below
+  // (log in to accept / set up an account), which re-validates identity
+  // against the invitation again server-side on the next real accept call.
+  function handleSignOutAndContinue() {
+    logout();
+    setAccountMismatch(false);
   }
 
   function handleSetupFormChange(event) {
@@ -190,7 +224,23 @@ export default function AcceptInvitationPage() {
           I agree to the Terms of Service and Privacy Policy.
         </label>
 
-        {isAuthenticated ? (
+        {accountMismatch ? (
+          <div className="space-y-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+            <p className="text-sm font-semibold text-amber-900">
+              This invitation was sent to a different account.
+            </p>
+            <p className="text-sm text-amber-800">
+              Sign out and continue with the account that received this invitation.
+            </p>
+            <button
+              type="button"
+              onClick={handleSignOutAndContinue}
+              className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
+            >
+              Sign out and continue
+            </button>
+          </div>
+        ) : isAuthenticated ? (
           <button
             type="button"
             onClick={handleAccept}

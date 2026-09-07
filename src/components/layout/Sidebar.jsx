@@ -747,25 +747,25 @@ function SidebarContent({
   const canManageTeams = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   // Backend team visibility (GET /teams) is already scoped per-user — this
-  // is only a coarse "should we even bother fetching" gate, so it must
-  // include everyone who could possibly have a team assigned: a plain
-  // Team Manager, a Team Member, and a Project Manager who's been granted
-  // team-manager privileges (the `is_team_manager` flag) and/or assigned
-  // as a specific team's manager (backend scopes exactly which team(s)
-  // that resolves to — this flag just decides whether to ask). Previously
-  // checked `user?.role === "team_manager"` only, which missed a Project
-  // Manager granted the is_team_manager flag entirely — their assigned
-  // team never even loaded, regardless of what the backend would have
-  // returned.
+  // is only a coarse "should we even bother fetching, and render the
+  // section at all" gate. It must include everyone with genuine
+  // Team-management/admin capability: Owner/Admin (role or `is_org_admin`
+  // flag), a plain Team Manager (role or granted `is_team_manager` flag),
+  // and a Team Member (sees their own team). It must NOT include a
+  // Project-Manager-only user (role `project_manager` with no
+  // `is_team_manager` flag) — Project Manager capability alone grants no
+  // Team access, so showing an empty "TEAMS / No teams yet" block for
+  // that user was misleading (Teams sidebar visibility bug-fix). A
+  // Project Manager who has ALSO been granted `is_team_manager` (or made
+  // Admin/Owner) still correctly sees this section via those same
+  // capability checks — this is additive capability, not role-exclusive.
   const canViewTeams =
     user?.role === "owner" ||
     user?.role === "admin" ||
     user?.is_org_admin ||
     user?.role === "team_manager" ||
     user?.role === "team_member" ||
-    user?.role === "project_manager" ||
-    user?.is_team_manager ||
-    user?.is_project_manager;
+    user?.is_team_manager;
 
   const isTeamMember = user?.role === "team_member";
   const isAdmin = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
