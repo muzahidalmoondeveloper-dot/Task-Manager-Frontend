@@ -203,6 +203,13 @@ export default function ProjectDetailPage() {
   const [objectiveRocks, setObjectiveRocks] = useState([]);
   const [rockKpis, setRockKpis] = useState([]);
   const [projectTeams, setProjectTeams] = useState([]);
+  // Project Manager Team-selection bug-fix: the {id, name, assigned}
+  // picker options for the "+ Add Team" menu below — separate from
+  // `projectTeams` (full team cards with member lists) and from `teams`
+  // (org-wide, Owner/Admin/Team-Manager-only via GET /teams).
+  const [assignableTeamOptions, setAssignableTeamOptions] = useState([]);
+  const [isTeamMenuOpen, setIsTeamMenuOpen] = useState(false);
+  const [isMutatingTeamId, setIsMutatingTeamId] = useState(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -227,6 +234,18 @@ export default function ProjectDetailPage() {
   // this project at all), never the full org list.
   const assignableTeams = (canCreateTasks && !canManageTasks) ? projectTeams : teams;
   const canManageProjects = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+  // Project Manager Team-selection bug-fix: who may explicitly attach/
+  // detach a Team on THIS project (POST/DELETE /projects/{id}/teams/...).
+  // Deliberately NOT the same set as canManageProjects above — a plain
+  // Team Manager can manage tasks/logo here but must NOT be able to
+  // attach an arbitrary team to a project merely by being a Team Manager
+  // (backend's require_project_access blocks that too; see
+  // app.core.project_access's "ProjectMembership alone is never
+  // sufficient" rule) — only Owner/Admin, or a genuine Project Manager
+  // (who reached this page at all only because they're a member of it).
+  const isAdminOrOwner = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
+  const isProjectManagerCapability = user?.role === "project_manager" || user?.is_project_manager;
+  const canManageProjectTeams = isAdminOrOwner || isProjectManagerCapability;
 
   async function handleLogoFileChange(e) {
     const file = e.target.files?.[0];
@@ -434,6 +453,44 @@ export default function ProjectDetailPage() {
     }
   }
 
+  // Project Manager Team-selection bug-fix.
+  async function loadAssignableTeams() {
+    if (!canManageProjectTeams) return;
+    try {
+      const options = await projectApi.listAssignableTeams(projectId);
+      setAssignableTeamOptions(options);
+    } catch {
+      setAssignableTeamOptions([]);
+    }
+  }
+
+  async function handleAssignTeam(teamId) {
+    setIsMutatingTeamId(teamId);
+    try {
+      await projectApi.assignTeam(projectId, teamId);
+      setIsTeamMenuOpen(false);
+      toast.success("Team added to this project.");
+      await Promise.all([loadData(), loadAssignableTeams()]);
+    } catch (err) {
+      toast.error(err.message || "Unable to add team.");
+    } finally {
+      setIsMutatingTeamId(null);
+    }
+  }
+
+  async function handleUnassignTeam(teamId) {
+    setIsMutatingTeamId(teamId);
+    try {
+      await projectApi.unassignTeam(projectId, teamId);
+      toast.success("Team removed from this project.");
+      await Promise.all([loadData(), loadAssignableTeams()]);
+    } catch (err) {
+      toast.error(err.message || "Unable to remove team.");
+    } finally {
+      setIsMutatingTeamId(null);
+    }
+  }
+
   // Deliberately independent of loadData()'s Promise.all — a Working Time
   // failure (e.g. a client without project access) must never blank out
   // the rest of Project Detail, matching how the optional users/teams
@@ -502,9 +559,11 @@ export default function ProjectDetailPage() {
 
   useEffect(() => {
     loadData();
+    loadAssignableTeams();
     resetForm();
     setActiveTab("overview");
-  }, [projectId, canCreateTasks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, canCreateTasks, canManageProjectTeams]);
 
   useEffect(() => {
     if (activeTab !== "reports") return;
@@ -1246,6 +1305,41 @@ export default function ProjectDetailPage() {
                 <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-indigo-700">
                   {projectTeams.length}
                 </span>
+
+                {canManageProjectTeams && (
+                  <div className="relative ml-auto">
+                    <button
+                      type="button"
+                      onClick={() => setIsTeamMenuOpen((v) => !v)}
+                      className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      + Add Team
+                    </button>
+                    {isTeamMenuOpen && (
+                      <div className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg">
+                        {assignableTeamOptions.filter((o) => !o.assigned).length === 0 ? (
+                          <p className="px-3 py-2 text-xs text-slate-400">
+                            {assignableTeamOptions.length === 0
+                              ? "No teams available in this organization."
+                              : "Every team is already added to this project."}
+                          </p>
+                        ) : (
+                          assignableTeamOptions.filter((o) => !o.assigned).map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              disabled={isMutatingTeamId === option.id}
+                              onClick={() => handleAssignTeam(option.id)}
+                              className="block w-full rounded-lg px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {option.name}
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {projectTeams.length === 0 ? (
@@ -1255,7 +1349,11 @@ export default function ProjectDetailPage() {
                     <path d="M2.5 15.5A4.5 4.5 0 017 11h.25a4.5 4.5 0 014.5 4.5.5.5 0 01-.5.5H3a.5.5 0 01-.5-.5zM14 16h3.5a.5.5 0 00.5-.5 3.5 3.5 0 00-5.437-2.917A5.98 5.98 0 0114 16z" />
                   </svg>
                   <p className="text-sm font-medium text-slate-500">No teams are working on this project yet.</p>
-                  <p className="mt-1 text-xs text-slate-400">Teams appear here once their Rocks, KPIs, or tasks are linked to this project.</p>
+                  <p className="mt-1 text-xs text-slate-400">
+                    {canManageProjectTeams
+                      ? "Use + Add Team above to attach an existing team, or teams appear automatically once their Rocks, KPIs, or tasks are linked to this project."
+                      : "Teams appear here once their Rocks, KPIs, or tasks are linked to this project."}
+                  </p>
                 </div>
               ) : (
                 <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -1263,9 +1361,22 @@ export default function ProjectDetailPage() {
                     <div key={team.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition hover:shadow-md">
                       <div className="mb-3 flex items-start justify-between gap-2">
                         <h3 className="text-sm font-semibold text-slate-900">{team.name}</h3>
-                        <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
-                          {team.members?.length || 0} member{(team.members?.length || 0) === 1 ? "" : "s"}
-                        </span>
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
+                            {team.members?.length || 0} member{(team.members?.length || 0) === 1 ? "" : "s"}
+                          </span>
+                          {canManageProjectTeams && (
+                            <button
+                              type="button"
+                              title="Remove team from this project"
+                              disabled={isMutatingTeamId === team.id}
+                              onClick={() => handleUnassignTeam(team.id)}
+                              className="rounded-full p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         {(team.members || []).map((member) => (
