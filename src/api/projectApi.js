@@ -15,6 +15,18 @@ export const projectApi = {
     return apiClient.get("/projects/for-managed-teams");
   },
 
+  // Team Manager Project-dropdown follow-up: the canonical org-scoped
+  // Project-OPTIONS source ({id, name} only) — every active Project in
+  // the current organization, regardless of ProjectMembership/managed-
+  // Team linkage. Reused by both Task Create and Rock Create for a plain
+  // Team Manager (whose GET /projects and /projects/for-managed-teams
+  // can both legitimately be empty). Seeing a project here never implies
+  // Project-management permission over it — that stays governed
+  // entirely by the existing, separate authorization rules.
+  options() {
+    return apiClient.get("/projects/options");
+  },
+
   getById(id) {
     return apiClient.get(`/projects/${id}`);
   },
