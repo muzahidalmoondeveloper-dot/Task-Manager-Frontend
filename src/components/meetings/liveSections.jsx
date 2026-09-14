@@ -7,6 +7,7 @@ import { rockApi } from "../../api/rockApi";
 import { teamNewsApi } from "../../api/teamNewsApi";
 import { issueApi } from "../../api/issueApi";
 import { teamApi } from "../../api/teamApi";
+import { useAuth } from "../../context/AuthContext";
 
 // ─── Shared bits ────────────────────────────────────────────────────────────
 
@@ -64,6 +65,47 @@ function NoTeams() {
   return <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No teams in this organization yet.</p>;
 }
 
+// Meeting permission-scoping follow-up: KPI/Rock/News/IDS are all Team-
+// scoped modules (backend: app.core.team_access.require_team_access —
+// Owner/Admin unrestricted, everyone else only a team they manage or hold
+// TeamMembership on). A Project Manager's authority is Project-scoped, not
+// Team-scoped, and has no carve-out in that check — so `teamApi.list()`
+// (already access-scoped) returning zero teams for a plain PM is a real,
+// authoritative "you have no access to this module," not "the
+// organization has no teams." Opening a Meeting must never change that:
+// this reuses the exact same scoped `teams` result every section already
+// fetched, rather than inventing a parallel permission system.
+//
+// `isTeamRoleHolder` covers every role whose OWN capability is Team-scoped
+// in the first place (Owner/Admin always; Team Manager/Team Member by
+// definition of the role) — for them, zero teams is a genuine data fact
+// ("no teams exist/assigned yet"), never a permission denial. Anyone else
+// (a plain Project Manager, a Client, ...) has no Team-scoped rights at
+// all, so zero teams for them is the RESTRICTED case. Deliberately not
+// `if (role === "project_manager") restrict` — a hybrid PM+TM or PM+Admin
+// still resolves correctly here via their real, combined capability.
+function useTeamAccess() {
+  const { user } = useAuth();
+  const teams = useTeams();
+  const isAdminOrOwner = user?.role === "owner" || user?.role === "admin" || Boolean(user?.is_org_admin);
+  const isTeamRoleHolder = isAdminOrOwner
+    || user?.role === "team_manager" || Boolean(user?.is_team_manager)
+    || user?.role === "team_member";
+  const status = teams === null ? "loading" : teams.length > 0 ? "ok" : (isTeamRoleHolder ? "empty" : "restricted");
+  return { teams, status };
+}
+
+// Compact, professional restricted state — distinct from both "loading"
+// and "authorized but genuinely empty." Never reuses NoTeams' copy: "no
+// permission" must never be mistaken for "organization has no data."
+function RestrictedSection() {
+  return (
+    <p className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-400">
+      <span aria-hidden="true">🔒</span> This section is not available for your role.
+    </p>
+  );
+}
+
 // ─── KPI (was "Scorecard") ──────────────────────────────────────────────────
 // Read-only glance at real weekly measurables (status computed server-side
 // by app/services/kpi_service.py — the same source of truth the dedicated
@@ -77,7 +119,7 @@ const KPI_STATUS_BADGE = {
 };
 
 export function KpiSection({ extraItems = [], wide = false }) {
-  const teams = useTeams();
+  const { teams, status } = useTeamAccess();
   const aggregated = useAggregated(teams, kpiApi.list);
   // `extraItems` are KPIs created by the parent page's "+ Add" flow —
   // merged in the same way News/IDS/To-Do already do, deduped by id in
@@ -87,8 +129,9 @@ export function KpiSection({ extraItems = [], wide = false }) {
     ...aggregated,
   ];
 
-  if (teams === null || kpis === null) return <LoadingRows />;
-  if (teams.length === 0) return <NoTeams />;
+  if (status === "loading" || kpis === null) return <LoadingRows />;
+  if (status === "restricted") return <RestrictedSection />;
+  if (status === "empty") return <NoTeams />;
   if (kpis.length === 0) {
     return <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No measurables set up yet.</p>;
   }
@@ -134,7 +177,14 @@ const ROCK_STATUS_BADGE = {
 };
 
 export function RockReviewSection({ canManage, extraItems = [], wide = false }) {
-  const teams = useTeams();
+  const { teams, status } = useTeamAccess();
+  // Effective manage capability: the coarse role-level `canManage` flag
+  // ANDed with actually having a Team to manage a Rock under — a plain
+  // Project Manager can be "canManage" at the role level (Task delegation,
+  // Meetings, ...) while genuinely having zero Rock/Team authority; this
+  // is what keeps "+ status controls" from appearing for a role that has
+  // no Team-scoped mutation permission at all.
+  const effectiveCanManage = canManage && status === "ok";
   const aggregated = useAggregated(teams, rockApi.list);
   // Status edits are layered on top of the fetched snapshot as overrides
   // (id -> new status) rather than copied into a separate mutable array —
@@ -157,8 +207,9 @@ export function RockReviewSection({ canManage, extraItems = [], wide = false }) 
     }
   }
 
-  if (teams === null || rocks === null) return <LoadingRows />;
-  if (teams.length === 0) return <NoTeams />;
+  if (status === "loading" || rocks === null) return <LoadingRows />;
+  if (status === "restricted") return <RestrictedSection />;
+  if (status === "empty") return <NoTeams />;
   if (rocks.length === 0) {
     return <p className="rounded-xl border border-dashed border-slate-200 p-6 text-center text-sm text-slate-400">No rocks set for this quarter.</p>;
   }
@@ -182,7 +233,7 @@ export function RockReviewSection({ canManage, extraItems = [], wide = false }) 
               </div>
               <p className="truncate text-xs text-slate-400">{rock.owner?.full_name || "Unassigned"}</p>
             </div>
-            {canManage ? (
+            {effectiveCanManage ? (
               <div className="flex shrink-0 gap-1">
                 {ROCK_STATUSES.map((s) => (
                   <button key={s} type="button" onClick={() => setStatus(rock, s)}
@@ -214,7 +265,8 @@ export function RockReviewSection({ canManage, extraItems = [], wide = false }) 
 // the item can be reassigned afterward from the Team News tab.
 
 export function NewsSection({ canManage, extraItems = [], wide = false }) {
-  const teams = useTeams();
+  const { teams, status } = useTeamAccess();
+  const effectiveCanManage = canManage && status === "ok";
   const aggregated = useAggregated(teams, teamNewsApi.list);
   // Freshly-posted items are kept in their own small list and prepended at
   // render time rather than copied into the fetched snapshot — `aggregated`
@@ -255,14 +307,15 @@ export function NewsSection({ canManage, extraItems = [], wide = false }) {
     }
   }
 
-  if (teams === null || news === null) return <LoadingRows />;
-  if (teams.length === 0) return <NoTeams />;
+  if (status === "loading" || news === null) return <LoadingRows />;
+  if (status === "restricted") return <RestrictedSection />;
+  if (status === "empty") return <NoTeams />;
 
   const reviewedCount = news.filter((n) => reviewedIds.has(n.id)).length;
 
   return (
     <div className={`w-full text-left ${wide ? "" : "max-w-lg"}`}>
-      {canManage && (
+      {effectiveCanManage && (
         <div className="mb-4 flex gap-2">
           <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Post a news item…"
             onKeyDown={(e) => e.key === "Enter" && postNews()}
@@ -290,7 +343,7 @@ export function NewsSection({ canManage, extraItems = [], wide = false }) {
                     </div>
                     {item.owner && <p className="truncate text-xs text-slate-400">{item.owner.full_name}</p>}
                   </div>
-                  {canManage && (
+                  {effectiveCanManage && (
                     <button type="button" disabled={isReviewed} onClick={() => markReviewed(item)}
                       className="shrink-0 rounded-lg border border-slate-300 px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-default disabled:opacity-40">
                       {isReviewed ? "Reviewed" : "Mark Reviewed"}
@@ -376,7 +429,8 @@ export function TodoListSection({ meeting, canManage, taskName, setTaskName, onC
 // as News above, for the same reason (no team picker anymore).
 
 export function IdsSection({ canManage, extraItems = [], wide = false }) {
-  const teams = useTeams();
+  const { teams, status } = useTeamAccess();
+  const effectiveCanManage = canManage && status === "ok";
   const aggregated = useAggregated(teams, issueApi.list);
   // Same pattern as News above: freshly-created issues and resolved ids
   // are tracked separately and merged with the fetched snapshot at render
@@ -426,12 +480,13 @@ export function IdsSection({ canManage, extraItems = [], wide = false }) {
     }
   }
 
-  if (teams === null || issues === null) return <LoadingRows />;
-  if (teams.length === 0) return <NoTeams />;
+  if (status === "loading" || issues === null) return <LoadingRows />;
+  if (status === "restricted") return <RestrictedSection />;
+  if (status === "empty") return <NoTeams />;
 
   return (
     <div className={`w-full text-left ${wide ? "" : "max-w-lg"}`}>
-      {canManage && (
+      {effectiveCanManage && (
         <div className="mb-4 flex gap-2">
           <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="New issue…"
             onKeyDown={(e) => e.key === "Enter" && createIssue()}
@@ -467,7 +522,7 @@ export function IdsSection({ canManage, extraItems = [], wide = false }) {
               );
             })}
           </div>
-          {canManage && (
+          {effectiveCanManage && (
             <button type="button" disabled={selectedIds.length === 0} onClick={() => setBegun(true)}
               className="mt-4 rounded-xl bg-orange-400 px-5 py-2 text-sm font-semibold text-white hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-50">
               Begin IDS
@@ -484,7 +539,7 @@ export function IdsSection({ canManage, extraItems = [], wide = false }) {
                   <p className="truncate text-sm font-medium text-slate-800">{issue.title}</p>
                   {issue.description && <p className="truncate text-xs text-slate-400">{issue.description}</p>}
                 </div>
-                {canManage && (
+                {effectiveCanManage && (
                   <button type="button" onClick={() => resolveIssue(issue)}
                     className="shrink-0 rounded-lg border border-emerald-300 px-3 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50">
                     Resolved

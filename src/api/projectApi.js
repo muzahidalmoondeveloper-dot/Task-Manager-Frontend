@@ -5,6 +5,16 @@ export const projectApi = {
     return apiClient.get("/projects");
   },
 
+  // Team Manager Create-Task-form follow-up: GET /projects returns nothing
+  // for a plain Team Manager (they have no direct Project-management
+  // capability) — this is the scoped, additive source for Projects
+  // reachable through a Team they actually manage (explicit Project<->Team
+  // association), never organization-wide Project access. Safe to call for
+  // any role; harmlessly returns [] for anyone who manages no Team.
+  listForManagedTeams() {
+    return apiClient.get("/projects/for-managed-teams");
+  },
+
   getById(id) {
     return apiClient.get(`/projects/${id}`);
   },

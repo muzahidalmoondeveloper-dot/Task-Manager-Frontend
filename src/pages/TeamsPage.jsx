@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 
 import { teamApi } from "../api/teamApi";
 import { userApi } from "../api/userApi";
+import { useAuth } from "../context/AuthContext";
 import { useConfirm } from "../context/ConfirmContext";
 
 const initialForm = {
@@ -34,6 +35,12 @@ function ThreeDotsIcon() {
 export default function TeamsPage() {
   const navigate = useNavigate();
   const confirm = useConfirm();
+  const { user } = useAuth();
+  // Scoreboard authorization follow-up: this page's team-name link used
+  // to always land directly on the Team Detail page's Scoreboard tab —
+  // now Admin-only, so a non-admin clicking their own team must land on
+  // the first tab they can actually see instead of a blank/hidden one.
+  const canViewTeamScoreboard = user?.role === "owner" || user?.role === "admin" || Boolean(user?.is_org_admin);
   const [teams, setTeams] = useState([]);
   const [users, setUsers] = useState([]);
 
@@ -440,7 +447,7 @@ export default function TeamsPage() {
                             <div className="min-w-0">
                               <button
                                 type="button"
-                                onClick={() => navigate(`/teams/${team.id}?tab=scoreboard`)}
+                                onClick={() => navigate(`/teams/${team.id}?tab=${canViewTeamScoreboard ? "scoreboard" : "news"}`)}
                                 className="truncate font-semibold text-slate-900 hover:text-indigo-600 hover:underline"
                               >
                                 {team.name}

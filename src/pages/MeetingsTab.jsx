@@ -2,7 +2,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Select from "../components/Select";
 import toast from "react-hot-toast";
 import { meetingApi } from "../api/meetingApi";
-import { userApi } from "../api/userApi";
 import { issueApi } from "../api/issueApi";
 import { teamNewsApi } from "../api/teamNewsApi";
 import { teamApi } from "../api/teamApi";
@@ -125,6 +124,16 @@ function SpeakingOrderAvatar({ name, state, onClick }) {
 // Meetings aren't team-specific, so no team_id is needed here at all.
 export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
   const { user } = useAuth();
+  // Meeting permission-scoping follow-up: a plain Project Manager (no
+  // Owner/Admin/Team-Manager capability) — used to keep the To-Do
+  // toolbar's individual-assignee-capable modal Owner/Admin/Team-Manager-
+  // only (existing Task delegation model: a PM may never directly assign
+  // a Team Member), without touching the coarse `canManage` prop's
+  // existing meaning/value.
+  const isPlainProjectManager = Boolean(canManage) && !(
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin
+    || user?.role === "team_manager" || user?.is_team_manager
+  );
   const [elapsed, setElapsed] = useState(0);
   const [newAgendaTitle, setNewAgendaTitle] = useState("");
   const [decisionContent, setDecisionContent] = useState("");
@@ -133,6 +142,7 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
   const [checkinFlashId, setCheckinFlashId] = useState(null);
   const [manualSpeakerId, setManualSpeakerId] = useState("");
   const [orgUsers, setOrgUsers] = useState([]);
+  const [orgUsersLoading, setOrgUsersLoading] = useState(false);
   const [addParticipantId, setAddParticipantId] = useState("");
   const [addingParticipant, setAddingParticipant] = useState(false);
   const checkinSpinningRef = useRef(false);
@@ -474,11 +484,19 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
     }
   }
 
-  // Org-wide member list to add participants from — a meeting isn't
-  // team-specific, so this isn't limited to one team's roster.
+  // Member list to add participants from — a meeting isn't team-specific,
+  // so this isn't limited to one team's roster. Meeting Attendees
+  // follow-up: this used to call the org-wide GET /users (Owner/Admin
+  // only) directly, 403-ing for a plain Project Manager and leaving this
+  // list empty. Backend-scoped replacement — org-wide for Owner/Admin/
+  // Team Manager (unchanged), managed-Project-scoped for a plain PM.
   useEffect(() => {
     if (!canManage) return;
-    userApi.list().then(setOrgUsers).catch(() => {});
+    setOrgUsersLoading(true);
+    meetingApi.listEligibleAttendees()
+      .then(setOrgUsers)
+      .catch(() => {})
+      .finally(() => setOrgUsersLoading(false));
   }, [canManage]);
 
   // Task Assignee bug-fix follow-up: the To-Do modal's Assignee dropdown
@@ -985,38 +1003,55 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
 
         {meeting.status === "ongoing" && canManage && (
           <div className="flex items-center justify-end gap-2 border-b border-slate-100 px-6 py-3">
-            <div className="relative">
-              <button type="button" onClick={openTodoFlow}
-                className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-                <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" /></svg>
-                Add To-Do
-              </button>
-              {todoTeamPickerOpen && (
-                <div className="absolute right-0 top-9 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
-                  <p className="mb-2 text-xs font-semibold text-slate-500">Which team is this to-do for?</p>
-                  <Select value={pickedTeamId} onChange={(e) => setPickedTeamId(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-sm text-slate-700">
-                    {defaultTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                  </Select>
-                  <div className="mt-2 flex gap-2">
-                    <button type="button" onClick={() => setTodoTeamPickerOpen(false)}
-                      className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
-                    <button type="button" onClick={confirmTodoTeam}
-                      className="flex-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">Continue</button>
+            {/* Meeting permission-scoping follow-up: CreateTodoModal exposes
+                a direct individual-assignee picker, which conflicts with a
+                plain Project Manager's delegation-only Task model — kept
+                Owner/Admin/Team-Manager-only here (a PM still has full,
+                correct Task delegation via the dedicated Tasks page, and
+                can still add a plain, unassigned to-do inline in the
+                To-Do section below regardless of role). */}
+            {!isPlainProjectManager && (
+              <div className="relative">
+                <button type="button" onClick={openTodoFlow}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" /></svg>
+                  Add To-Do
+                </button>
+                {todoTeamPickerOpen && (
+                  <div className="absolute right-0 top-9 z-20 w-64 rounded-xl border border-slate-200 bg-white p-3 shadow-lg">
+                    <p className="mb-2 text-xs font-semibold text-slate-500">Which team is this to-do for?</p>
+                    <Select value={pickedTeamId} onChange={(e) => setPickedTeamId(e.target.value)}
+                      className="w-full px-2.5 py-1.5 text-sm text-slate-700">
+                      {defaultTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </Select>
+                    <div className="mt-2 flex gap-2">
+                      <button type="button" onClick={() => setTodoTeamPickerOpen(false)}
+                        className="flex-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancel</button>
+                      <button type="button" onClick={confirmTodoTeam}
+                        className="flex-1 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700">Continue</button>
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-            <button type="button" onClick={() => (defaultTeams.length ? setIssueModalOpen(true) : toast.error("No team available to file this issue under."))}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-              <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
-              Add Issue
-            </button>
-            <button type="button" onClick={() => (defaultTeams.length ? setNewsModalOpen(true) : toast.error("No team available to post this news item under."))}
-              className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
-              <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M3.5 3.75A.75.75 0 014.25 3h10.5a.75.75 0 01.6 1.2l-3 4a.75.75 0 000 .9l3 4a.75.75 0 01-.6 1.2H5.5v3.25a.75.75 0 01-1.5 0V3.75z" /></svg>
-              Add News
-            </button>
+                )}
+              </div>
+            )}
+            {/* Issue/News are Team-scoped modules (require_team_access) —
+                a role with zero accessible Teams (e.g. a plain Project
+                Manager) gets no button at all, never a button that opens
+                a modal with nothing to file the record under. */}
+            {defaultTeams.length > 0 && (
+              <>
+                <button type="button" onClick={() => setIssueModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 8a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" /></svg>
+                  Add Issue
+                </button>
+                <button type="button" onClick={() => setNewsModalOpen(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor"><path d="M3.5 3.75A.75.75 0 014.25 3h10.5a.75.75 0 01.6 1.2l-3 4a.75.75 0 000 .9l3 4a.75.75 0 01-.6 1.2H5.5v3.25a.75.75 0 01-1.5 0V3.75z" /></svg>
+                  Add News
+                </button>
+              </>
+            )}
             {!isRecordingLocal ? (
               <button type="button" onClick={() => setRecordingModalOpen(true)}
                 className="flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-50">
@@ -1212,9 +1247,11 @@ export function LiveMeetingPanel({ meeting, canManage, onUpdate, onClose }) {
             </div>
             {canManage && (
               <div className="mt-6 flex max-w-sm items-center gap-2">
-                <Select value={addParticipantId} onChange={(e) => setAddParticipantId(e.target.value)} className="flex-1 px-3 py-2 text-sm">
-                  <option value="">{availableToAdd.length === 0 ? "No more org members to add" : "Add an attendee…"}</option>
-                  {availableToAdd.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
+                <Select value={addParticipantId} onChange={(e) => setAddParticipantId(e.target.value)} disabled={orgUsersLoading} className="flex-1 px-3 py-2 text-sm">
+                  <option value="">
+                    {orgUsersLoading ? "Loading attendees…" : availableToAdd.length === 0 ? "No more eligible members to add" : "Add an attendee…"}
+                  </option>
+                  {!orgUsersLoading && availableToAdd.map((u) => <option key={u.id} value={u.id}>{u.full_name || u.email}</option>)}
                 </Select>
                 <button type="button" onClick={addParticipant} disabled={!addParticipantId || addingParticipant}
                   className="shrink-0 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">

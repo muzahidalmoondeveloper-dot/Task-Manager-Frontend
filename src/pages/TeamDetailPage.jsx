@@ -26,7 +26,6 @@ import RocksTab from "./RocksTab";
 import KPIsTab from "./KPIsTab";
 import IssuesTab from "./IssuesTab";
 import TeamScoreboardTab from "./TeamScoreboardTab";
-import MyTeamScoreboardTab from "./MyTeamScoreboardTab";
 import RichEditor from "../components/RichEditor";
 
 function stripHtml(html) {
@@ -1031,6 +1030,13 @@ export default function TeamDetailPage() {
     user?.is_org_admin ||
     team?.team_manager?.id === user?.id;
 
+  // Scoreboard authorization follow-up: Scoreboard is an ADMIN-ONLY
+  // feature — deliberately NOT `canManageTasks` above (which also
+  // includes this exact Team's own manager), since Team Manager
+  // capability alone must never grant Scoreboard access, even for a
+  // team they genuinely manage.
+  const canViewTeamScoreboard = user?.role === "owner" || user?.role === "admin" || Boolean(user?.is_org_admin);
+
   const members = useMemo(() => {
     return team?.members || [];
   }, [team]);
@@ -1280,7 +1286,7 @@ export default function TeamDetailPage() {
 
       <div className="mb-8 border-b border-slate-200">
         <nav className="flex gap-1">
-          {TEAM_PAGE_TABS.map((tab) => (
+          {TEAM_PAGE_TABS.filter((tab) => tab.id !== "scoreboard" || canViewTeamScoreboard).map((tab) => (
             <button
               key={tab.id}
               type="button"
@@ -1572,10 +1578,13 @@ export default function TeamDetailPage() {
         <IssuesTab team={team} canManage={canManageTasks} />
       )}
 
-      {activeTab === "scoreboard" && (
-        user?.role === "team_member"
-          ? <MyTeamScoreboardTab team={team} userId={user.id} />
-          : <TeamScoreboardTab team={team} />
+      {/* Scoreboard authorization follow-up: Scoreboard is Admin-only —
+          a Team Manager/Team Member can no longer reach this tab's
+          content at all (the tab button itself is already hidden for
+          them above), so the "my own team" variant is unreachable and
+          intentionally no longer rendered here. */}
+      {activeTab === "scoreboard" && canViewTeamScoreboard && (
+        <TeamScoreboardTab team={team} />
       )}
 
       {celebrationData && (

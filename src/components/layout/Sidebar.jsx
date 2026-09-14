@@ -738,11 +738,14 @@ function SidebarContent({
   const canManageUsers =
     user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
-  // Scoreboard's own nav visibility is intentionally left untouched here
-  // (out of scope for this fix) — kept as its own variable so it can't
-  // silently change if canManageUsers's definition changes again later.
+  // Scoreboard authorization follow-up: Scoreboard is now an ADMIN-ONLY
+  // feature — the previous `|| user?.role === "team_manager"` grant is
+  // removed (Team Manager/Project Manager capability, alone or combined,
+  // never grants Scoreboard access). Same canonical Admin capability as
+  // canManageUsers above (kept as its own variable so it can't silently
+  // change if canManageUsers's definition changes again later).
   const canViewOrgScoreboard =
-    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
+    user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 
   const canManageTeams = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
 

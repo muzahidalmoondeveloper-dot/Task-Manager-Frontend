@@ -6,6 +6,7 @@ import toast from "react-hot-toast";
 import { scoreboardApi } from "../api/scoreboardApi";
 import { projectApi } from "../api/projectApi";
 import { reportApi } from "../api/reportApi";
+import { useAuth } from "../context/AuthContext";
 import DatePicker from "../components/DatePicker";
 import RingChart from "../components/scoreboard/RingChart";
 import ScoreTrendCard from "../components/scoreboard/ScoreTrendCard";
@@ -20,9 +21,31 @@ import {
   StatCard,
 } from "../components/scoreboard/scoreboardShared";
 
+// Scoreboard authorization follow-up: Scoreboard is an ADMIN-ONLY feature
+// (canonical Admin capability — role or granted `is_org_admin` flag, same
+// rule the backend's `require_org_admin` now enforces on every Scoreboard
+// endpoint). Same direct-navigation guard pattern as UsersPage.jsx's
+// canViewOrgUsers — a Team Manager/Project Manager/Team Member must not
+// reach this page just by URL even though the sidebar link is already
+// hidden for them.
+function canViewScoreboard(user) {
+  if (!user) return true; // don't redirect before the user has loaded
+  return user.role === "owner" || user.role === "admin" || Boolean(user.is_org_admin);
+}
+
 export default function UserScoreboardPage() {
   const { userId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const hasScoreboardAccess = canViewScoreboard(user);
+
+  useEffect(() => {
+    if (user && !hasScoreboardAccess) {
+      toast.error("You don't have permission to access Scoreboard.");
+      navigate("/dashboard", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const [period, setPeriod] = useState("this_month");
   const [customStart, setCustomStart] = useState("");
@@ -38,12 +61,13 @@ export default function UserScoreboardPage() {
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
 
   useEffect(() => {
+    if (!hasScoreboardAccess) return;
     projectApi.list()
       .then(setProjects)
       .catch(() => {
         // Non-fatal — filters are optional; the scoreboard still loads without them.
       });
-  }, []);
+  }, [hasScoreboardAccess]);
 
   const queryParams = useMemo(() => {
     const params = { period, project_id: projectId || undefined };
@@ -55,6 +79,7 @@ export default function UserScoreboardPage() {
   }, [period, projectId, customStart, customEnd]);
 
   useEffect(() => {
+    if (!hasScoreboardAccess) return;
     if (period === "custom" && (!customStart || !customEnd)) return;
 
     let cancelled = false;
@@ -79,7 +104,7 @@ export default function UserScoreboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [userId, queryParams, period, customStart, customEnd]);
+  }, [hasScoreboardAccess, userId, queryParams, period, customStart, customEnd]);
 
   if (isLoading && !data) {
     return <div className="rounded-2xl bg-white p-6 text-sm text-slate-500 shadow-sm">Loading scoreboard...</div>;

@@ -6,7 +6,6 @@ import Select from "../Select";
 import { meetingApi } from "../../api/meetingApi";
 import { meetingTemplateApi } from "../../api/meetingTemplateApi";
 import { projectApi } from "../../api/projectApi";
-import { userApi } from "../../api/userApi";
 import { Avatar } from "./meetingHelpers";
 import { AVATAR_COLORS, MEETING_TYPES, fmtDuration, getInitials } from "./meetingConstants";
 
@@ -109,8 +108,9 @@ export default function CreateMeetingModal({ team, teamMembers, teams, meeting, 
   );
   const activeTeam = team || teams?.find((t) => String(t.id) === selectedTeamId) || null;
   const [orgUsers, setOrgUsers] = useState([]);
+  const [orgUsersLoading, setOrgUsersLoading] = useState(!team);
   // No team picked → meetings aren't team-specific, so fall back to every
-  // org member as the Owner/Attendees pool instead of leaving it empty.
+  // eligible member as the Owner/Attendees pool instead of leaving it empty.
   const activeTeamMembers = team ? teamMembers : (activeTeam?.members || orgUsers);
 
   const [title, setTitle] = useState(meeting?.title || "");
@@ -149,7 +149,14 @@ export default function CreateMeetingModal({ team, teamMembers, teams, meeting, 
       meetingTemplateApi.list().then(setTemplates).catch(() => {});
     }
     if (!team) {
-      userApi.list().then(setOrgUsers).catch(() => {});
+      // Meeting Attendees follow-up: this used to call the org-wide GET
+      // /users (Owner/Admin only) directly, 403-ing for a plain Project
+      // Manager and leaving Attendees empty. Backend-scoped replacement —
+      // see meetings.py's _eligible_attendee_ids for the exact rule.
+      meetingApi.listEligibleAttendees()
+        .then(setOrgUsers)
+        .catch(() => {})
+        .finally(() => setOrgUsersLoading(false));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -382,9 +389,9 @@ export default function CreateMeetingModal({ team, teamMembers, teams, meeting, 
 
               <div>
                 <label className="mb-1 block text-xs font-medium text-slate-500">Meeting Owner</label>
-                <Select value={organizerId} onChange={(e) => setOrganizerId(e.target.value)} className="w-full px-3 py-2.5 text-sm focus:ring-2 focus:ring-teal-500">
-                  <option value="">Unassigned</option>
-                  {activeTeamMembers.map((m) => {
+                <Select value={organizerId} onChange={(e) => setOrganizerId(e.target.value)} disabled={orgUsersLoading} className="w-full px-3 py-2.5 text-sm focus:ring-2 focus:ring-teal-500">
+                  <option value="">{orgUsersLoading ? "Loading…" : "Unassigned"}</option>
+                  {!orgUsersLoading && activeTeamMembers.map((m) => {
                     const uid = m.user?.id || m.id;
                     const name = m.user?.full_name || m.full_name || m.email;
                     return <option key={uid} value={uid}>{name}</option>;
@@ -421,9 +428,12 @@ export default function CreateMeetingModal({ team, teamMembers, teams, meeting, 
                   className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500" />
               </div>
 
-              {activeTeamMembers.length > 0 && (
+              {(orgUsersLoading || activeTeamMembers.length > 0) && (
                 <div>
                   <label className="mb-2 block text-xs font-medium text-slate-500">Attendees</label>
+                  {orgUsersLoading ? (
+                    <p className="text-xs text-slate-400">Loading attendees…</p>
+                  ) : (
                   <div className="flex flex-wrap gap-2">
                     {activeTeamMembers.map((m) => {
                       const uid = m.user?.id || m.id;
@@ -440,6 +450,7 @@ export default function CreateMeetingModal({ team, teamMembers, teams, meeting, 
                       );
                     })}
                   </div>
+                  )}
                 </div>
               )}
             </div>
