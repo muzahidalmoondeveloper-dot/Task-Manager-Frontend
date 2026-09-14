@@ -863,7 +863,18 @@ export default function RocksTab({ team, canManage }) {
         if (Array.isArray(ts)) setTeams(ts);
       } catch { /* teams optional */ }
       try {
-        const ps = await projectApi.list();
+        // Team Manager Rock-create Project-dropdown follow-up: `GET
+        // /projects` returns nothing for a plain Team Manager (no
+        // direct Project-management capability), which previously left
+        // this dropdown empty even when the organization has real
+        // Projects. Every viewer who can even open Rock Create here is
+        // already Owner/Admin or this exact Team's own manager (see
+        // TeamDetailPage's `canManageTasks`), so the canonical org-
+        // scoped Project-OPTIONS source is always the right one — never
+        // narrower ProjectMembership/managed-Team-linkage filtering,
+        // per the product rule that Project dropdown visibility is not
+        // Project management authority.
+        const ps = await projectApi.options();
         if (Array.isArray(ps)) setProjects(ps);
       } catch { /* projects optional */ }
     } catch {

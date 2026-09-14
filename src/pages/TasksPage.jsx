@@ -237,7 +237,15 @@ const CALENDAR_SUBVIEWS = [
 // placeholder date into whichever one fires from a bare calendar click risks
 // quietly encouraging the wrong shape of Task; flagged as a follow-up instead
 // of guessing at a merged UX here.
-function TaskCalendar({ tasks, filtersActive, onTaskClick }) {
+function TaskCalendar({ tasks, filtersActive, onTaskClick, canClickTask }) {
+  // Team Manager task-authority-precedence follow-up: `onTaskClick` used
+  // to be an all-or-nothing prop — every chip on the calendar was either
+  // clickable or none were. `canClickTask(task)`, when given, narrows
+  // that PER TASK (e.g. My Tasks can mix tasks this actor fully manages
+  // with ones they're merely the assignee of) — defaults to "always
+  // clickable" so the All Tasks calendar (already server-prescoped, no
+  // per-task predicate needed) keeps its exact existing behavior.
+  const clickHandlerFor = (task) => (onTaskClick && (!canClickTask || canClickTask(task))) ? onTaskClick : undefined;
   const [subView, setSubView] = useState("month");
   const [cursorDate, setCursorDate] = useState(new Date());
   const [dayDetailKey, setDayDetailKey] = useState(null);
@@ -310,7 +318,7 @@ function TaskCalendar({ tasks, filtersActive, onTaskClick }) {
           )}
         </div>
         <div className="space-y-1">
-          {visible.map((task) => <CalendarTaskChip key={task.id} task={task} onClick={onTaskClick} />)}
+          {visible.map((task) => <CalendarTaskChip key={task.id} task={task} onClick={clickHandlerFor(task)} />)}
           {overflowCount > 0 && (
             <button type="button" onClick={() => setDayDetailKey(key)}
               className="block w-full rounded-md px-1.5 py-0.5 text-left text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900">
@@ -390,11 +398,13 @@ function TaskCalendar({ tasks, filtersActive, onTaskClick }) {
                       </p>
                     </>
                   );
-                  // Same read-only rule as CalendarTaskChip: no onTaskClick
-                  // means nothing exists for this actor to reuse here, so
-                  // render an inert row instead of a dead button.
-                  return onTaskClick ? (
-                    <button key={task.id} type="button" onClick={() => onTaskClick(task)} className={rowClassName}>
+                  // Same read-only rule as CalendarTaskChip: no click
+                  // handler for THIS task means nothing exists for this
+                  // actor to reuse here, so render an inert row instead
+                  // of a dead button.
+                  const rowClickHandler = clickHandlerFor(task);
+                  return rowClickHandler ? (
+                    <button key={task.id} type="button" onClick={() => rowClickHandler(task)} className={rowClassName}>
                       {rowContent}
                     </button>
                   ) : (
@@ -452,7 +462,7 @@ function TaskCalendar({ tasks, filtersActive, onTaskClick }) {
 
 // ─── Task card for mobile ─────────────────────────────────────────────────────
 
-function TaskCard({ task, canManageTasks, canEditTaskDetails, isTeamMember, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
+function TaskCard({ task, canManageTasks, canEditTaskDetails, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
   const overdue = isOverdue(task);
 
   return (
@@ -534,7 +544,11 @@ function TaskCard({ task, canManageTasks, canEditTaskDetails, isTeamMember, user
             Edit Task
           </button>
         </div>
-      ) : isTeamMember && task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done" ? (
+      ) : task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done" ? (
+        // Assignee-safe status control — independent of role (see
+        // canFullyManageTask's own comment): a Team Manager who is
+        // merely the assignee of this Task (not its Team's manager)
+        // falls through to here exactly like a plain Team Member would.
         <div className="mt-3">
           <Select value={task.status} onChange={(e) => onStatusChange(task, e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-2 py-1.5 text-xs">
@@ -910,6 +924,115 @@ export default function TasksPage() {
   // blocked for the current actor (a plain Team Manager).
   const [managedTeamProjectMap, setManagedTeamProjectMap] = useState({});
 
+  // Team Manager task-authority-precedence follow-up (bug fix): the flat
+  // `canManageTasks`/`canEditTaskDetails` above are correct for "All
+  // Tasks" (server-scoped to teams/projects this user actually manages —
+  // see list_tasks()'s own scope_team_ids/scope_project_ids) but were
+  // ALSO being used, unscoped, for "My Tasks" — which the backend scopes
+  // by ASSIGNEE, not by managed Team/Project. A Team Manager's "My
+  // Tasks" can include a Task from a Team they do NOT manage (they're
+  // just its assignee); the flat flags wrongly presented full edit
+  // controls for it, and the backend correctly rejected the save with
+  // "As the assignee, you may only update this task's status." — a
+  // stronger authority (managing THIS task's Team) must never be
+  // downgraded by also being the assignee, but a WEAKER one (merely
+  // being the assignee, on a Team this user doesn't manage) must never
+  // be shown as if it were the stronger one either. These two helpers
+  // recompute the SAME precedence the backend's
+  // require_task_update_access/is_team_manager_scoped_to_task use, PER
+  // TASK, for every place that shows/submits edit controls for a task
+  // that isn't guaranteed to already be inside a server-prescoped list.
+  const managedTeamIds = useMemo(
+    () => new Set((teams || []).filter((t) => t.team_manager_id === user?.id).map((t) => t.id)),
+    [teams, user?.id]
+  );
+  // Granted-flag Team Manager (`is_team_manager`), not just the literal
+  // primary role — `canManageTasks` above only checks the literal role
+  // string, which already matches the backend's own `is_manager_or_above`
+  // (role OR granted flag) for every OTHER capability in this app.
+  const isTeamManagerCapable = user?.role === "team_manager" || Boolean(user?.is_team_manager);
+
+  // Task ownership/personal-task follow-up: a Personal/Standalone Task
+  // (no Team — e.g. an AI-generated Task with no Team resolved) is owned
+  // by whoever it's assigned to, a DIFFERENT and STRONGER concept than a
+  // bare Team Task assignee (see the backend's identical
+  // is_personal_task_owner — team_id IS NULL and I AM the assignee).
+  // Mirrors the backend exactly: no role check beyond excluding Client
+  // (never a legal assignee at all).
+  function isPersonalTaskOwner(task) {
+    return Boolean(task) && task.team_id == null && task.assignee_id === user?.id && user?.role !== "client";
+  }
+
+  function canFullyManageTask(task) {
+    if (!task) return false;
+    if (user?.role === "owner" || user?.role === "admin" || user?.is_org_admin) return true;
+    if (isTeamManagerCapable && task.team_id != null && managedTeamIds.has(task.team_id)) return true;
+    return isPersonalTaskOwner(task);
+  }
+
+  function canEditTaskDetailsFor(task) {
+    return canFullyManageTask(task) || isPlainProjectManager;
+  }
+
+  // Personal-Task-edit-payload follow-up (Issue 2): the Edit Task modal
+  // used to always send the FULL field set on submit, including
+  // `assignee_id` re-sent at its current, UNCHANGED value — for a
+  // Personal Task owner (team_id NULL, they ARE the assignee), that
+  // "no-op" resend still hits the backend's PERSONAL_TASK_OWNER_ALLOWED_
+  // FIELDS whitelist, which deliberately excludes `assignee_id`, so the
+  // whole PATCH was rejected outright, even though the user only meant
+  // to change e.g. Priority. Fix: diff the form against the task's own
+  // current values and submit only what actually changed — mirrors what
+  // a hand-written, careful PATCH client would do, and is required
+  // regardless of role (an Owner/Admin/Team Manager editing someone
+  // else's task benefits from the same smaller, more honest PATCH).
+  // `assignee_id` is otherwise NEVER included for a Personal Task owner's
+  // own edit — the Personal Task owner never "reassigns" through this
+  // path; only an explicit Team-Manager/Owner/Admin assignee change (a
+  // task they fully manage via Team scope) may submit it. The ONE
+  // exception (Edit-Task-flow follow-up — Personal Task -> managed Team
+  // Task transition): when `team_id` is ALSO changing away from NULL in
+  // this same diff, `assignee_id` is allowed through too, so a Team
+  // Manager can pick both the Team and its new owner in a single Save —
+  // no Save-then-reopen round trip. This only decides whether the FIELD
+  // rides along; the backend's own `is_personal_to_managed_team_transition`
+  // check is the actual authorization boundary (caller must legitimately
+  // manage that exact target team, target assignee re-validated in full)
+  // — sending it when unauthorized just gets rejected, exactly like any
+  // other manipulated request.
+  function buildChangedTaskFields(original, form) {
+    if (!original) return {};
+    const candidates = {
+      name:        form.name,
+      description: form.description || null,
+      start_date:  form.start_date || null,
+      due_date:    form.due_date   || null,
+      assignee_id: form.assignee_id ? Number(form.assignee_id) : null,
+      project_id:  form.project_id  ? Number(form.project_id)  : null,
+      team_id:     form.team_id     ? Number(form.team_id)     : null,
+      status:      form.status,
+      priority:    form.priority,
+    };
+    const originals = {
+      name:        original.name || "",
+      description: original.description || null,
+      start_date:  original.start_date || null,
+      due_date:    original.due_date   || null,
+      assignee_id: original.assignee_id ?? null,
+      project_id:  original.project_id  ?? null,
+      team_id:     original.team_id     ?? null,
+      status:      original.status || "",
+      priority:    original.priority || "",
+    };
+    const isTransitioningToTeam = candidates.team_id !== originals.team_id && candidates.team_id !== null;
+    const changed = {};
+    for (const key of Object.keys(candidates)) {
+      if (key === "assignee_id" && isPersonalTaskOwner(original) && !isTransitioningToTeam) continue;
+      if (candidates[key] !== originals[key]) changed[key] = candidates[key];
+    }
+    return changed;
+  }
+
   // Loading / error
   const [myTasksLoading,  setMyTasksLoading]  = useState(true);
   const [allTasksLoading, setAllTasksLoading] = useState(false);
@@ -1008,24 +1131,42 @@ export default function TasksPage() {
     // is the scoped, additive source for a plain Team Manager (whose GET
     // /projects is always empty by design) — settled independently too, so
     // it never blanks out the org-wide `projects` result for Owner/Admin/PM.
-    const [userResult, projectResult, teamResult, managedTeamProjectResult] = await Promise.allSettled([
+    // `team_ids` from this call still feeds the Project->Team cascade
+    // (`managedTeamProjectMap`) below — kept even though the PROJECT LIST
+    // itself now also gets the broader org-wide source next.
+    //
+    // Team Manager Project-dropdown follow-up: `for-managed-teams` alone
+    // is still too narrow for the actual product rule — it only returns
+    // Projects already attached to a Team this caller manages via the
+    // explicit Project<->Team association, which can legitimately be
+    // empty even when the organization has real Projects (the exact
+    // reported bug: a brand-new managed Team with no Project attached
+    // yet left the dropdown empty). `GET /projects/options` is the
+    // canonical "every active Project in this organization" source —
+    // fetched for anyone who ISN'T a plain Project Manager (who keeps
+    // their existing, unchanged, ProjectMembership-scoped `GET /projects`
+    // result — this task never asked to broaden PM's own Project
+    // visibility, only a plain Team Manager's).
+    const [userResult, projectResult, teamResult, managedTeamProjectResult, projectOptionsResult] = await Promise.allSettled([
       canManageTasks ? userApi.list() : Promise.resolve([]),
       projectApi.list(),
       teamApi.list(),
       projectApi.listForManagedTeams(),
+      isPlainProjectManager ? Promise.resolve([]) : projectApi.options(),
     ]);
     if (userResult.status === "fulfilled") setUsers(userResult.value);
     if (teamResult.status === "fulfilled") setTeams(teamResult.value);
 
     const baseProjects = projectResult.status === "fulfilled" ? projectResult.value : [];
     const managedTeamProjects = managedTeamProjectResult.status === "fulfilled" ? managedTeamProjectResult.value : [];
+    const orgProjectOptions = projectOptionsResult.status === "fulfilled" ? projectOptionsResult.value : [];
+
+    const merged = new Map(baseProjects.map((p) => [p.id, p]));
+    for (const p of managedTeamProjects) if (!merged.has(p.id)) merged.set(p.id, p);
+    for (const p of orgProjectOptions) if (!merged.has(p.id)) merged.set(p.id, p);
+    setProjects(Array.from(merged.values()));
     if (managedTeamProjects.length) {
-      const merged = new Map(baseProjects.map((p) => [p.id, p]));
-      for (const p of managedTeamProjects) if (!merged.has(p.id)) merged.set(p.id, p);
-      setProjects(Array.from(merged.values()));
       setManagedTeamProjectMap(Object.fromEntries(managedTeamProjects.map((p) => [p.id, p.team_ids])));
-    } else if (projectResult.status === "fulfilled") {
-      setProjects(baseProjects);
     }
   }
 
@@ -1169,7 +1310,19 @@ export default function TasksPage() {
 
   // The dropdown's actual option source: Team eligibility wins whenever a
   // team is selected (Rule B/C precedence), org-wide list otherwise.
-  const modalAssignees = formData.team_id ? teamAssignableUsers : assignees;
+  //
+  // Task ownership/default-assignee follow-up: when no Team is selected,
+  // the current user must ALWAYS be a selectable option here, even if
+  // the org-wide `assignees` list is empty for this role (GET /users is
+  // Owner/Admin-only — a plain Team Manager's `assignees` is legitimately
+  // `[]`). Without this, the preselected "Assign to me" default above has
+  // no matching <option> to actually render/select, and a Team Manager
+  // would have no way to explicitly confirm the default at all.
+  const modalAssignees = formData.team_id
+    ? teamAssignableUsers
+    : (user?.id && !assignees.some((a) => String(a.id) === String(user.id))
+        ? [{ id: user.id, full_name: user.full_name || user.email }, ...assignees]
+        : assignees);
 
   // Team Manager Create-Task-form follow-up: Project->Team dependency.
   // null = no restriction (no Project selected, or the source couldn't
@@ -1272,14 +1425,20 @@ export default function TasksPage() {
   }
 
   function getStatusOptionsForTask(task) {
-    if (canEditTaskDetails) return STATUS_OPTIONS;
+    if (canEditTaskDetailsFor(task)) return STATUS_OPTIONS;
     if (task.status === "pending_review" || task.status === "done") return STATUS_OPTIONS.filter((o) => o.value === task.status);
     return TEAM_MEMBER_STATUS_OPTIONS;
   }
 
+  // Assignee-safe status change: independent of role — a Team Manager
+  // who is merely the assignee of a Task in a Team they don't manage
+  // gets exactly the same assignee-safe status control a plain Team
+  // Member would, never a hard "no access" just because their role
+  // isn't literally team_member (see canFullyManageTask's own docstring
+  // comment for the full precedence rationale).
   function canChangeStatus(task) {
-    if (canEditTaskDetails) return true;
-    return isTeamMember && task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done";
+    if (canEditTaskDetailsFor(task)) return true;
+    return task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done";
   }
 
   // ─── Actions ────────────────────────────────────────────────────────────────
@@ -1302,6 +1461,17 @@ export default function TasksPage() {
 
   function openCreateModal() {
     resetForm();
+    // Task ownership/default-assignee follow-up (UX): preselect the
+    // current user as Assignee so a Team-less Task never LOOKS like it
+    // can only be created Unassigned (the exact reported confusion — for
+    // a Team Manager, GET /users 403s and `assignees` is empty, so the
+    // dropdown previously showed nothing but "Unassigned"). This is a UX
+    // default only — the backend independently defaults an omitted/null
+    // assignee_id to the creator regardless of what this form shows (see
+    // create_task's own docstring), and picking a Team below still
+    // re-scopes this field to that Team's eligible members exactly as
+    // before; Owner/Admin remain free to change it to anyone.
+    setFormData((p) => ({ ...p, assignee_id: user?.id ? String(user.id) : "" }));
     setOpenMenuId(null);
     setIsModalOpen(true);
     // No specific task exists yet to be "this"/"it" — clear any stale
@@ -1382,10 +1552,13 @@ export default function TasksPage() {
     setFormError("");
     try {
       // Strict whitelist matching the backend's PM_ALLOWED_TASK_UPDATE_FIELDS
-      // — assignee_id and project_id are never sent, not even the task's
-      // own current (unchanged) value, so a PM's PATCH can never be
-      // mistaken for an assignment attempt.
-      const payload = {
+      // — assignee_id and project_id are never candidates here at all, not
+      // even the task's own current (unchanged) value, so a PM's PATCH can
+      // never be mistaken for an assignment attempt. Personal-Task-edit-
+      // payload follow-up: diffed against the task's own current values
+      // like every other Edit Task path, so an unrelated no-op field never
+      // rides along either.
+      const candidates = {
         name:        formData.name,
         description: formData.description || null,
         start_date:  formData.start_date || null,
@@ -1394,7 +1567,22 @@ export default function TasksPage() {
         priority:    formData.priority,
         team_id:     formData.team_id ? Number(formData.team_id) : null,
       };
-      const updated = await taskApi.update(editingTaskId, payload);
+      const originals = {
+        name:        editingTask?.name || "",
+        description: editingTask?.description || null,
+        start_date:  editingTask?.start_date || null,
+        due_date:    editingTask?.due_date   || null,
+        status:      editingTask?.status || "",
+        priority:    editingTask?.priority || "",
+        team_id:     editingTask?.team_id  ?? null,
+      };
+      const payload = {};
+      for (const key of Object.keys(candidates)) {
+        if (candidates[key] !== originals[key]) payload[key] = candidates[key];
+      }
+      const updated = Object.keys(payload).length > 0
+        ? await taskApi.update(editingTaskId, payload)
+        : editingTask;
       updateTaskInLists(updated);
       toast.success("Task updated.");
       closeModal();
@@ -1411,21 +1599,44 @@ export default function TasksPage() {
     setIsSubmitting(true);
     setFormError("");
     try {
-      const payload = {
-        name:        formData.name,
-        description: formData.description || null,
-        start_date:  formData.start_date || null,
-        due_date:    formData.due_date   || null,
-        // Leave unassigned to land the task in the team's To-Do list instead.
-        assignee_id: formData.assignee_id ? Number(formData.assignee_id) : null,
-        project_id:  formData.project_id  ? Number(formData.project_id)  : null,
-        team_id:     formData.team_id     ? Number(formData.team_id)     : null,
-        status:      formData.status,
-        priority:    formData.priority,
-      };
+      // Team Manager task-authority-precedence follow-up (defense in
+      // depth): every UI entry point that could open this modal for a
+      // Task this actor does NOT fully manage is already gated out
+      // (My Tasks table/card/calendar all use canFullyManageTask/
+      // canEditTaskDetailsFor per task) — this modal should never
+      // actually be reached for such a Task. If it somehow is anyway,
+      // never submit more than the backend's own assignee-safe field
+      // whitelist would accept; sending the full payload would just be
+      // rejected, matching backend precedence instead of trusting the
+      // UI path that got us here.
+      const payload = (isEditing && !canFullyManageTask(editingTask))
+        ? { status: formData.status }
+        : isEditing
+        // Personal-Task-edit-payload follow-up: an EDIT must only submit
+        // fields the user actually changed from the task's own current
+        // values — never re-send every field verbatim (see
+        // buildChangedTaskFields's own docstring for why this matters:
+        // a Personal Task owner's PATCH is field-whitelisted server-side,
+        // and `assignee_id` is deliberately NOT in that whitelist even
+        // when the value would be a no-op).
+        ? buildChangedTaskFields(editingTask, formData)
+        : {
+            name:        formData.name,
+            description: formData.description || null,
+            start_date:  formData.start_date || null,
+            due_date:    formData.due_date   || null,
+            // Leave unassigned to land the task in the team's To-Do list instead.
+            assignee_id: formData.assignee_id ? Number(formData.assignee_id) : null,
+            project_id:  formData.project_id  ? Number(formData.project_id)  : null,
+            team_id:     formData.team_id     ? Number(formData.team_id)     : null,
+            status:      formData.status,
+            priority:    formData.priority,
+          };
 
       if (isEditing) {
-        const updated = await taskApi.update(editingTaskId, payload);
+        const updated = Object.keys(payload).length > 0
+          ? await taskApi.update(editingTaskId, payload)
+          : editingTask;
         updateTaskInLists(updated);
         toast.success("Task updated.");
       } else {
@@ -1866,7 +2077,7 @@ export default function TasksPage() {
                                 {task.review_note && <p className="mt-1 text-xs text-amber-600">Note: {task.review_note}</p>}
                               </td>
                               <td className="px-4 py-4 align-middle">
-                                {canEditTaskDetails ? (
+                                {canEditTaskDetailsFor(task) ? (
                                   <Select value={task.priority || "medium"} disabled={pendingTaskIds.has(task.id)} onChange={(e) => quickPriorityUpdate(task, e.target.value)}
                                     className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none">
                                     {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -1878,7 +2089,7 @@ export default function TasksPage() {
                               <td className="px-4 py-4 align-middle text-slate-700">{task.project?.name || "—"}</td>
                               <td className="px-4 py-4 align-middle text-slate-700">{task.team?.name || "—"}</td>
                               <td className="px-4 py-4 align-middle text-slate-700">
-                                {canEditTaskDetails ? (
+                                {canEditTaskDetailsFor(task) ? (
                                   <DatePicker
                                     value={task.start_date || ""}
                                     disabled={pendingTaskIds.has(task.id)}
@@ -1889,7 +2100,7 @@ export default function TasksPage() {
                                 )}
                               </td>
                               <td className="px-4 py-4 align-middle">
-                                {canEditTaskDetails ? (
+                                {canEditTaskDetailsFor(task) ? (
                                   <DatePicker
                                     value={task.due_date || ""}
                                     disabled={pendingTaskIds.has(task.id)}
@@ -1921,8 +2132,8 @@ export default function TasksPage() {
                                 />
                               </td>
                               <td className="px-4 py-4 text-right align-middle">
-                                {canEditTaskDetails ? (
-                                  canManageTasks && task.status === "pending_review" ? (
+                                {canEditTaskDetailsFor(task) ? (
+                                  canFullyManageTask(task) && task.status === "pending_review" ? (
                                     <div className="flex justify-end gap-2">
                                       <button type="button" onClick={() => approveTask(task)} disabled={reviewActionId === task.id}
                                         className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -1965,7 +2176,7 @@ export default function TasksPage() {
                         key={task.id}
                         task={task}
                         canManageTasks={false}
-                        canEditTaskDetails={canEditTaskDetails}
+                        canEditTaskDetails={canEditTaskDetailsFor(task)}
                         isTeamMember={isTeamMember}
                         user={user}
                         onEdit={handleEdit}
@@ -2046,7 +2257,14 @@ export default function TasksPage() {
               // handler when this actor actually has an Edit Task entry
               // point elsewhere on this page (List/Board already agree:
               // neither gives a plain Team Member/Client one either).
-              onTaskClick={(canManageTasks || isPlainProjectManager) ? handleEdit : null}
+              // Team Manager task-authority-precedence follow-up:
+              // `canClickTask` narrows this PER TASK — a Team Manager's
+              // My Tasks can include a Task from a Team they don't
+              // manage (see canFullyManageTask's own comment), which
+              // must open no editor here either, matching List/Board's
+              // identical rule.
+              onTaskClick={handleEdit}
+              canClickTask={(task) => canFullyManageTask(task) || isPlainProjectManager}
             />
           )}
         </>
@@ -2309,8 +2527,11 @@ export default function TasksPage() {
           {/* Project Manager Actions-menu follow-up: a plain PM joins this
               exact menu (never a second one) but never gets Delete —
               DELETE /tasks/{id} stays Owner/Admin/Team-Manager only,
-              unchanged; offering it here would just 403. */}
-          {canManageTasks && (
+              unchanged; offering it here would just 403. Team Manager
+              task-authority-precedence follow-up: PER TASK, not blanket
+              — a Team Manager who merely happens to be this Task's
+              assignee (not its Team's manager) must not see Delete. */}
+          {canFullyManageTask(openMenuTask) && (
             <button type="button" onClick={() => { setMenuPos(null); handleDelete(openMenuTask); }}
               className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50">
               Delete
@@ -2387,13 +2608,44 @@ export default function TasksPage() {
                 </Select>
               </div>
 
-              {/* Managers/admins can assign a task directly on creation, not
-                  just when editing — leave unassigned to land it in the
-                  team's To-Do list instead. Assigning to yourself is just
-                  picking your own name here, same as anyone else. Defaults
-                  to Unassigned, and is scoped to the selected Team's
-                  eligible members once one is picked (see modalAssignees). */}
-              {canManageTasks && (
+              {/* Personal Task Assignee UX follow-up: editing your OWN
+                  Personal Task (team_id NULL, you ARE the assignee) shows
+                  a fixed, read-only "Assigned to you" indicator instead of
+                  an editable dropdown — you already own this Task; there
+                  is nothing to reassign, and the backend never accepts
+                  `assignee_id` on this actor's PATCH regardless (see
+                  buildChangedTaskFields). This also closes off the
+                  Personal-Task-owner -> Team transition bypass: since this
+                  field can't be touched here, picking a Team in the same
+                  request can never double as picking an arbitrary member
+                  through the weaker personal-owner permission tier.
+
+                  Edit-Task-flow follow-up: this only holds while the DRAFT
+                  team (`formData.team_id`), not the persisted original, is
+                  still empty. The instant the Team Manager picks one of
+                  their managed Teams here, the Assignee field becomes the
+                  same editable, Team-scoped dropdown below IN THE SAME
+                  MODAL — `modalAssignees`/`teamAssignableUsers` already
+                  react to `formData.team_id` (see that effect), so no
+                  extra request or Save-then-reopen is needed. The backend
+                  independently re-verifies the caller actually manages
+                  that exact target team before accepting `assignee_id`
+                  alongside `team_id` — this is UX only, never the security
+                  boundary. */}
+              {isEditing && isPersonalTaskOwner(editingTask) && !formData.team_id ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    Assigned to you
+                  </p>
+                </div>
+              ) : canManageTasks && (
+                // Managers/admins can assign a task directly on creation, not
+                // just when editing — leave unassigned to land it in the
+                // team's To-Do list instead. Assigning to yourself is just
+                // picking your own name here, same as anyone else. Defaults
+                // to Unassigned, and is scoped to the selected Team's
+                // eligible members once one is picked (see modalAssignees).
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
                   <Select
@@ -2471,7 +2723,7 @@ export default function TasksPage() {
                 </h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {pmCreateMode === "self"
-                    ? "Personal work you'll do yourself under one of your projects."
+                    ? "Personal work you'll do yourself — optionally under one of your projects."
                     : "Delegate work to a team on one of your projects — the team's manager assigns the individual owner."}
                 </p>
               </div>
@@ -2498,10 +2750,22 @@ export default function TasksPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Project *</label>
-                <Select name="project_id" value={formData.project_id} onChange={handleChange} required
+                {/* Personal Task follow-up: Project is only mandatory when
+                    delegating to a Team ("project_team" mode) — the
+                    delegation's authorization scope originates entirely
+                    from the Project. In "self" mode this is the PM's own
+                    Personal/Standalone Task, which needs no Project anchor
+                    at all (mirrors every other role's Personal Task); the
+                    backend's own `create_task` only requires project_id
+                    when team_id is set, so this form must not be stricter
+                    than the API it calls. */}
+                <label className="mb-1 block text-sm font-medium text-slate-700">
+                  Project{pmCreateMode === "project_team" ? " *" : ""}
+                </label>
+                <Select name="project_id" value={formData.project_id} onChange={handleChange}
+                  required={pmCreateMode === "project_team"}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                  <option value="">Select project</option>
+                  <option value="">{pmCreateMode === "self" ? "No project (personal task)" : "Select project"}</option>
                   {/* Project options are already scoped to exactly the
                       Projects this Project Manager manages
                       (ProjectMembership) — GET /projects returns only

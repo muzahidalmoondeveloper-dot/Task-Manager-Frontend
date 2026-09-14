@@ -1713,7 +1713,15 @@ export default function KPIsTab({ team, canManage }) {
         if (Array.isArray(ts)) setTeams(ts);
       } catch { /* teams optional */ }
       try {
-        const ps = await projectApi.list();
+        // Team Manager KPI Create Project-dropdown follow-up: `GET
+        // /projects` (projectApi.list()) is Project-management-scoped —
+        // empty for a plain Team Manager with no ProjectMembership, which
+        // silently left this dropdown showing only "No project" (the
+        // reported bug). `projectApi.options()` (GET /projects/options)
+        // is the same canonical, read-only "every active Project in the
+        // organization" source Task Create/Rock Create already use —
+        // visibility only, confers no Project-management capability.
+        const ps = await projectApi.options();
         if (Array.isArray(ps)) setProjects(ps);
       } catch { /* projects optional */ }
       try {
