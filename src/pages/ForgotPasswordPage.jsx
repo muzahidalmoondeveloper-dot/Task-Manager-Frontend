@@ -5,6 +5,7 @@ import toast from "react-hot-toast";
 import { authApi } from "../api/authApi";
 import OtpBoxes from "../components/auth/OtpBoxes";
 import { PasswordStrengthBar, PasswordRequirementsChecklist } from "../components/auth/PasswordRequirements";
+import { OTP_RESEND_COOLDOWN_SECONDS } from "../utils/otpConstants";
 
 function EyeIcon({ visible }) {
   if (visible) {
@@ -74,7 +75,7 @@ export default function ForgotPasswordPage() {
       await authApi.forgotPassword({ email: trimmed });
       toast.success("OTP sent to your email.");
       setStep("otp");
-      setResendCooldown(30);
+      setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
       setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
     } catch (err) {
       setEmailError(err.message || "Unable to send OTP.");
@@ -87,9 +88,13 @@ export default function ForgotPasswordPage() {
     try {
       await authApi.resendOtp({ email: email.trim().toLowerCase(), purpose: "reset_password" });
       toast.success("OTP resent successfully.");
-      setResendCooldown(30);
+      setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
       setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
     } catch (err) {
+      // The backend enforces the real cooldown independently of this
+      // local timer — resync to the actual remaining time when it rejects.
+      const retryAfter = err.details?.retry_after_seconds;
+      if (typeof retryAfter === "number") setResendCooldown(retryAfter);
       toast.error(err.message || "Unable to resend OTP.");
     }
   }

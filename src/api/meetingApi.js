@@ -17,6 +17,14 @@ export const meetingApi = {
   checkTitle(title) {
     return apiClient.get(`/meetings/check-title?title=${encodeURIComponent(title)}`);
   },
+  // Meeting Attendees follow-up: backend-scoped attendee options for the
+  // Create/Edit Meeting page — Owner/Admin/Team Manager get every active
+  // org member (unchanged); a plain Project Manager gets only users
+  // reachable through their managed Project(s). Never the org-wide
+  // GET /users a Project Manager can't call.
+  listEligibleAttendees() {
+    return apiClient.get(`/meetings/eligible-attendees`);
+  },
   get(meetingId) {
     return apiClient.get(`/meetings/${meetingId}`);
   },

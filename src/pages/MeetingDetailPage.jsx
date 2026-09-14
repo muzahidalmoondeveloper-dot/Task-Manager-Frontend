@@ -109,7 +109,35 @@ const OVERVIEW_SECTIONS = [
   { key: "ids", title: "IDS", description: "Problems and obstacles to discuss with the team in IDS.", addLabel: "Add Issue" },
 ];
 
-function OverviewTab({ meeting, canManage, onCreateTask, taskName, setTaskName, onAdd, extras }) {
+function OverviewTab({ meeting, canManage, isManagerOrAbove, teams, onCreateTask, taskName, setTaskName, onAdd, extras }) {
+  // Meeting permission-scoping follow-up: the "+Add" toolbar button must
+  // never be shown when clicking it would do nothing useful.
+  //   - Rock Review/News/IDS are Team-scoped modules a plain Project
+  //     Manager CAN mutate once they genuinely have access to a Team
+  //     (app.core.team_access.require_team_access — manager or
+  //     TeamMembership, no PM-specific carve-out) — gated on having at
+  //     least one accessible Team (the same already-scoped
+  //     `teamApi.list()` result every section below already uses),
+  //     never on role alone.
+  //   - KPI is the one exception: `create_kpi`/`create_kpi_group` are
+  //     `require_org_manager`-gated on the backend (Owner/Admin/Team
+  //     Manager ONLY) — a Project Manager can never create a KPI even
+  //     with genuine Team access, so this button stays
+  //     Owner/Admin/Team-Manager-only regardless of `teams`.
+  //   - To-Do's toolbar modal (CreateTodoModal) exposes a direct
+  //     individual-assignee picker, which conflicts with a plain Project
+  //     Manager's delegation-only Task model (they may never directly
+  //     assign a Team Member) — kept Owner/Admin/Team-Manager-only here;
+  //     a Project Manager still has full, correct Task delegation via the
+  //     dedicated Tasks page, and can still add a to-do inline within
+  //     this same section (a plain, unassigned meeting-native item, safe
+  //     regardless of role).
+  function canAddSection(sectionKey) {
+    if (!canManage) return false;
+    if (sectionKey === "scorecard" || sectionKey === "todo_list") return isManagerOrAbove;
+    return teams.length > 0;
+  }
+
   return (
     <div>
       {OVERVIEW_SECTIONS.map((section) => (
@@ -119,7 +147,7 @@ function OverviewTab({ meeting, canManage, onCreateTask, taskName, setTaskName, 
           title={section.title}
           description={section.description}
           addLabel={section.addLabel}
-          onAdd={canManage ? () => onAdd(section.key) : null}
+          onAdd={canAddSection(section.key) ? () => onAdd(section.key) : null}
         >
           {section.key === "scorecard" ? (
             <KpiSection extraItems={extras.kpis} wide />
@@ -205,9 +233,10 @@ export default function MeetingDetailPage() {
   const { user } = useAuth();
   const { confirm } = useConfirm();
 
-  const canManage = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin
-    || user?.role === "team_manager" || user?.is_team_manager
-    || user?.role === "project_manager" || user?.is_project_manager;
+  const isManagerOrAbove = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin
+    || user?.role === "team_manager" || user?.is_team_manager;
+  const hasProjectManagerAccess = user?.role === "project_manager" || Boolean(user?.is_project_manager);
+  const canManage = isManagerOrAbove || hasProjectManagerAccess;
 
   const [meeting, setMeeting] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -501,7 +530,8 @@ export default function MeetingDetailPage() {
 
       {tab === "overview" ? (
         <OverviewTab
-          meeting={meeting} canManage={canManage} onCreateTask={createTask} taskName={taskName} setTaskName={setTaskName}
+          meeting={meeting} canManage={canManage} isManagerOrAbove={isManagerOrAbove} teams={teams}
+          onCreateTask={createTask} taskName={taskName} setTaskName={setTaskName}
           onAdd={openAdd}
           extras={{ kpis: extraKpis, rocks: extraRocks, news: extraNews, issues: extraIssues, tasks: extraTasks }}
         />

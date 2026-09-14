@@ -115,9 +115,11 @@ function EmptyState({ message, icon = "📋" }) {
 }
 
 function ThreeDotsIcon() {
+  // Vertical kebab (⋮) — three dots stacked on a shared x, not the
+  // horizontal (…) row this used to render.
   return (
     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-      <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM18 10a2 2 0 11-4 0 2 2 0 014 0z" />
+      <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
     </svg>
   );
 }
@@ -137,9 +139,320 @@ function toDateInputValue(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function isSameDay(a, b) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
+function addDays(date, n) {
+  const d = new Date(date);
+  d.setDate(d.getDate() + n);
+  return d;
+}
+
+function startOfWeek(date) {
+  const d = new Date(date);
+  d.setDate(d.getDate() - d.getDay());
+  return d;
+}
+
+function getWeekDays(date) {
+  const start = startOfWeek(date);
+  return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+}
+
+// Calendar redesign follow-up: "Today"/"Tomorrow" read naturally in Agenda;
+// anything further out gets its weekday name plus a short date so the list
+// stays scannable without repeating the current year on every row.
+function formatAgendaDateLabel(dateKey, today) {
+  const date = new Date(`${dateKey}T00:00:00`);
+  const tomorrow = addDays(today, 1);
+  const prefix = isSameDay(date, today) ? "Today" : isSameDay(date, tomorrow) ? "Tomorrow" : date.toLocaleDateString(undefined, { weekday: "long" });
+  return `${prefix} — ${date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`;
+}
+
+// ─── Calendar task chip ─────────────────────────────────────────────────────
+// Deliberately reuses only already-Dark-Mode-audited color pairs (the plain
+// slate surface classes, and the same bare `text-red-500` "Overdue" tag
+// DueDateCell already uses elsewhere on this page) rather than inventing new
+// badge colors this design would need its own Dark Mode pass for.
+
+function CalendarTaskChip({ task, onClick }) {
+  const overdue = isOverdue(task);
+  const priorityDotClass = { high: "bg-red-500", medium: "bg-amber-500", low: "bg-emerald-500" }[task.priority] || "bg-amber-500";
+  const contextLabel = task.project?.name || task.team?.name || null;
+  const content = (
+    <>
+      <span className={`block truncate text-[11px] font-semibold ${task.status === "done" ? "text-slate-400 line-through" : "text-slate-800"}`}>
+        {task.name}
+      </span>
+      <span className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] text-slate-500">
+        <span className={`inline-block h-1.5 w-1.5 shrink-0 rounded-full ${priorityDotClass}`} />
+        <span className="capitalize">{task.priority || "medium"}</span>
+        <span>•</span>
+        <span className="truncate">{getStatusLabel(task.status)}</span>
+        {overdue && <span className="font-bold uppercase text-red-500">Overdue</span>}
+      </span>
+      {contextLabel && <span className="block truncate text-[10px] text-slate-400">{contextLabel}</span>}
+    </>
+  );
+  // No onClick means this actor has no permitted Task interaction to reuse
+  // here (matches List/Board: a read-only role gets no Edit entry point
+  // there either) — render an inert, non-interactive chip instead of a
+  // button that would silently do nothing when clicked.
+  if (!onClick) {
+    return (
+      <div title={task.name} className="block w-full truncate rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1 text-left">
+        {content}
+      </div>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onClick(task)}
+      title={task.name}
+      className="block w-full truncate rounded-md border border-slate-200 bg-slate-50 px-1.5 py-1 text-left hover:bg-slate-100"
+    >
+      {content}
+    </button>
+  );
+}
+
+const CALENDAR_SUBVIEWS = [
+  { key: "month",  label: "Month"  },
+  { key: "week",   label: "Week"   },
+  { key: "agenda", label: "Agenda" },
+];
+
+// ─── Task Planning Calendar ─────────────────────────────────────────────────
+// Shared by both My Tasks and All Tasks — takes the SAME already-filtered,
+// already-scoped `tasks` array List/Board already use (no new fetch, no new
+// backend endpoint, no client-side re-broadening of what the caller can
+// see). Due Date is the primary calendar placement (matches this page's
+// pre-existing due-date grouping); Start Date is surfaced only as a small,
+// separate "Starts" line so a task never appears as two confusing full
+// chips. Empty-day "create a Task here" was deliberately left out of this
+// pass — My Tasks vs. All Tasks (self vs. project+team delegation) are two
+// different creation flows with different required fields, and stamping a
+// placeholder date into whichever one fires from a bare calendar click risks
+// quietly encouraging the wrong shape of Task; flagged as a follow-up instead
+// of guessing at a merged UX here.
+function TaskCalendar({ tasks, filtersActive, onTaskClick }) {
+  const [subView, setSubView] = useState("month");
+  const [cursorDate, setCursorDate] = useState(new Date());
+  const [dayDetailKey, setDayDetailKey] = useState(null);
+
+  const today = useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
+
+  const tasksByDueDate = useMemo(() => {
+    const map = {};
+    tasks.forEach((t) => {
+      if (!t.due_date) return;
+      (map[t.due_date] = map[t.due_date] || []).push(t);
+    });
+    return map;
+  }, [tasks]);
+
+  const tasksByStartDate = useMemo(() => {
+    const map = {};
+    tasks.forEach((t) => {
+      if (!t.start_date) return;
+      (map[t.start_date] = map[t.start_date] || []).push(t);
+    });
+    return map;
+  }, [tasks]);
+
+  const monthDays = useMemo(() => getMonthMatrix(cursorDate.getFullYear(), cursorDate.getMonth()), [cursorDate]);
+  const weekDays  = useMemo(() => getWeekDays(cursorDate), [cursorDate]);
+
+  const agendaGroups = useMemo(() => {
+    return Object.keys(tasksByDueDate).sort().map((key) => ({
+      key,
+      label: formatAgendaDateLabel(key, today),
+      isOverdueGroup: new Date(`${key}T00:00:00`) < today,
+      tasks: tasksByDueDate[key],
+    }));
+  }, [tasksByDueDate, today]);
+
+  function goPrev() {
+    setCursorDate((d) => (subView === "week" ? addDays(d, -7) : new Date(d.getFullYear(), d.getMonth() - 1, 1)));
+  }
+  function goNext() {
+    setCursorDate((d) => (subView === "week" ? addDays(d, 7) : new Date(d.getFullYear(), d.getMonth() + 1, 1)));
+  }
+  function goToday() {
+    setCursorDate(new Date());
+  }
+
+  function renderDayCell(day, { faded = false } = {}) {
+    const key = toDateInputValue(day);
+    const dueTasks = tasksByDueDate[key] || [];
+    // "Starts" is deliberately excluded whenever the same Task is already
+    // shown as a due-date chip on this exact day — never the same Task
+    // rendered twice on one date.
+    const startingOnly = (tasksByStartDate[key] || []).filter((t) => t.due_date !== key);
+    const isTodayCell = isSameDay(day, today);
+    const visible = dueTasks.slice(0, 2);
+    const overflowCount = dueTasks.length - visible.length;
+
+    return (
+      <div key={key} className={`min-h-28 border-r border-b border-slate-200 p-2 ${faded ? "bg-slate-50 text-slate-400" : ""}`}>
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className={
+            isTodayCell
+              ? "flex h-5 w-5 items-center justify-center rounded-full bg-slate-900 text-xs font-semibold text-white"
+              : "flex h-5 w-5 items-center justify-center text-xs font-semibold text-slate-700"
+          }>
+            {day.getDate()}
+          </span>
+          {dueTasks.length > 0 && (
+            <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">{dueTasks.length}</span>
+          )}
+        </div>
+        <div className="space-y-1">
+          {visible.map((task) => <CalendarTaskChip key={task.id} task={task} onClick={onTaskClick} />)}
+          {overflowCount > 0 && (
+            <button type="button" onClick={() => setDayDetailKey(key)}
+              className="block w-full rounded-md px-1.5 py-0.5 text-left text-[10px] font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-900">
+              +{overflowCount} more
+            </button>
+          )}
+        </div>
+        {startingOnly.length > 0 && (
+          <p className="mt-1 truncate text-[9px] text-slate-400">
+            Starts: {startingOnly.slice(0, 2).map((t) => t.name).join(", ")}{startingOnly.length > 2 ? ` +${startingOnly.length - 2}` : ""}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const hasAnyTasks = tasks.length > 0;
+  const dayDetailTasks = dayDetailKey ? (tasksByDueDate[dayDetailKey] || []) : [];
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className="flex flex-col gap-3 border-b border-slate-200 px-6 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2">
+          <button type="button" onClick={goPrev} aria-label="Previous"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">‹</button>
+          <button type="button" onClick={goToday}
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Today</button>
+          <button type="button" onClick={goNext} aria-label="Next"
+            className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">›</button>
+          <h2 className="ml-1 text-lg font-semibold text-slate-900">
+            {subView === "week"
+              ? `${weekDays[0].toLocaleDateString(undefined, { month: "short", day: "numeric" })} – ${weekDays[6].toLocaleDateString(undefined, { month: "short", day: "numeric" })}, ${weekDays[6].getFullYear()}`
+              : cursorDate.toLocaleString("default", { month: "long", year: "numeric" })}
+          </h2>
+        </div>
+        <div className="flex w-fit items-center gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
+          {CALENDAR_SUBVIEWS.map((v) => (
+            <button key={v.key} type="button" onClick={() => setSubView(v.key)}
+              className={v.key === subView
+                ? "rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white"
+                : "rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-500 hover:text-slate-900"}>
+              {v.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!hasAnyTasks ? (
+        <EmptyState icon="🗓️" message={filtersActive ? "No tasks match the selected filters." : "No tasks scheduled."} />
+      ) : subView === "agenda" ? (
+        <div className="divide-y divide-slate-100 sm:max-h-[600px] sm:overflow-y-auto">
+          {agendaGroups.length === 0 ? (
+            <EmptyState icon="🗓️" message="No tasks scheduled." />
+          ) : agendaGroups.map((group) => (
+            <div key={group.key} className="px-6 py-4">
+              <h3 className={`mb-2 text-sm font-semibold ${group.isOverdueGroup ? "text-red-600" : "text-slate-900"}`}>
+                {group.label}
+              </h3>
+              <div className="space-y-2">
+                {group.tasks.map((task) => {
+                  const overdue = isOverdue(task);
+                  const contextLabel = task.project?.name || task.team?.name || null;
+                  const rowClassName = "block w-full rounded-lg border border-slate-200 px-3 py-2 text-left" +
+                    (onTaskClick ? " hover:border-slate-300 hover:bg-slate-50" : "");
+                  const rowContent = (
+                    <>
+                      <p className={`text-sm font-medium ${task.status === "done" ? "text-slate-400 line-through" : "text-slate-900"}`}>
+                        {task.name}
+                      </p>
+                      <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                        {contextLabel && <span>{contextLabel}</span>}
+                        {contextLabel && <span>•</span>}
+                        <span className="capitalize">{task.priority || "medium"}</span>
+                        <span>•</span>
+                        <span>{getStatusLabel(task.status)}</span>
+                        {overdue && <span className="font-bold uppercase text-red-500">Overdue</span>}
+                      </p>
+                    </>
+                  );
+                  // Same read-only rule as CalendarTaskChip: no onTaskClick
+                  // means nothing exists for this actor to reuse here, so
+                  // render an inert row instead of a dead button.
+                  return onTaskClick ? (
+                    <button key={task.id} type="button" onClick={() => onTaskClick(task)} className={rowClassName}>
+                      {rowContent}
+                    </button>
+                  ) : (
+                    <div key={task.id} className={rowClassName}>{rowContent}</div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <div className="min-w-[700px]">
+            <div className="grid grid-cols-7 border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
+              {(subView === "week" ? weekDays : ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]).map((d) => (
+                <div key={subView === "week" ? toDateInputValue(d) : d} className="border-r border-slate-200 p-3">
+                  {subView === "week" ? `${d.toLocaleDateString(undefined, { weekday: "short" })} ${d.getDate()}` : d}
+                </div>
+              ))}
+            </div>
+            <div className="grid grid-cols-7">
+              {(subView === "week" ? weekDays : monthDays).map((day) =>
+                renderDayCell(day, { faded: subView === "month" && day.getMonth() !== cursorDate.getMonth() })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dayDetailKey && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6" onClick={() => setDayDetailKey(null)}>
+          <div className="max-h-[80vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-900">
+                {new Date(`${dayDetailKey}T00:00:00`).toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+              </h3>
+              <button type="button" onClick={() => setDayDetailKey(null)}
+                className="rounded-lg px-2 py-1 text-sm font-semibold text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+            <div className="space-y-2">
+              {dayDetailTasks.map((task) => (
+                <CalendarTaskChip
+                  key={task.id}
+                  task={task}
+                  onClick={onTaskClick ? (t) => { setDayDetailKey(null); onTaskClick(t); } : null}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─── Task card for mobile ─────────────────────────────────────────────────────
 
-function TaskCard({ task, canManageTasks, isTeamMember, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
+function TaskCard({ task, canManageTasks, canEditTaskDetails, isTeamMember, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
   const overdue = isOverdue(task);
 
   return (
@@ -212,6 +525,13 @@ function TaskCard({ task, canManageTasks, isTeamMember, user, onEdit, onDelete, 
           <button type="button" onClick={() => onDelete(task)}
             className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
             Delete
+          </button>
+        </div>
+      ) : canEditTaskDetails ? (
+        <div className="mt-3">
+          <button type="button" onClick={() => onEdit(task)}
+            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+            Edit Task
           </button>
         </div>
       ) : isTeamMember && task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done" ? (
@@ -301,29 +621,32 @@ function TaskTableRow({
   task,
   reviewActionId,
   canManageTasks,
+  canEditTaskDetails,
   isTeamMember,
   userId,
   assignees,
   onQuickStatus,
   onQuickPriority,
   onQuickAssignee,
+  onQuickDate,
   onApprove,
   onAssignBack,
   onToggleMenu,
+  isPending,
   workingTime,
   currentUserHasActiveTimer,
   onTimeChange,
   assignableUsersByTeamId,
   assignableUsersLoading,
 }) {
-  const canChange = canManageTasks || (
+  const canChange = canEditTaskDetails || (
     isTeamMember &&
     task.assignee_id === userId &&
     task.status !== "pending_review" &&
     task.status !== "done"
   );
 
-  const statusOpts = canManageTasks
+  const statusOpts = canEditTaskDetails
     ? STATUS_OPTIONS
     : (task.status === "pending_review" || task.status === "done")
       ? STATUS_OPTIONS.filter((o) => o.value === task.status)
@@ -335,7 +658,7 @@ function TaskTableRow({
       <td className="px-4 py-4 align-middle">
         <button
           type="button"
-          disabled={task.status === "pending_review" || (!canManageTasks && task.assignee_id !== userId)}
+          disabled={isPending || task.status === "pending_review" || (!canEditTaskDetails && task.assignee_id !== userId)}
           onClick={() => onQuickStatus(task, task.status === "done" ? "todo" : "done")}
           className={
             task.status === "done"
@@ -357,8 +680,8 @@ function TaskTableRow({
 
       {/* Priority */}
       <td className="px-4 py-4 align-middle">
-        {canManageTasks ? (
-          <Select value={task.priority || "medium"} onChange={(e) => onQuickPriority(task, e.target.value)}
+        {canEditTaskDetails ? (
+          <Select value={task.priority || "medium"} disabled={isPending} onChange={(e) => onQuickPriority(task, e.target.value)}
             className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none">
             {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </Select>
@@ -399,7 +722,7 @@ function TaskTableRow({
             );
           })()
         ) : (
-          task.assignee?.full_name || "—"
+          task.assignee?.full_name || "Unassigned"
         )}
       </td>
 
@@ -408,11 +731,29 @@ function TaskTableRow({
 
       {/* Start date */}
       <td className="px-4 py-4 align-middle text-slate-700">
-        {task.start_date ? formatDate(task.start_date) : <span className="text-slate-400">—</span>}
+        {canEditTaskDetails ? (
+          <DatePicker
+            value={task.start_date || ""}
+            disabled={isPending}
+            onChange={(e) => onQuickDate(task, "start_date", e.target.value)}
+          />
+        ) : task.start_date ? formatDate(task.start_date) : (
+          <span className="text-slate-400">—</span>
+        )}
       </td>
 
       {/* Due date */}
-      <td className="px-4 py-4 align-middle"><DueDateCell task={task} /></td>
+      <td className="px-4 py-4 align-middle">
+        {canEditTaskDetails ? (
+          <DatePicker
+            value={task.due_date || ""}
+            disabled={isPending}
+            onChange={(e) => onQuickDate(task, "due_date", e.target.value)}
+          />
+        ) : (
+          <DueDateCell task={task} />
+        )}
+      </td>
 
       {/* Status */}
       <td className="px-4 py-4 align-middle">
@@ -443,9 +784,9 @@ function TaskTableRow({
       </td>
 
       {/* Actions */}
-      {canManageTasks && (
+      {canEditTaskDetails ? (
         <td className="px-4 py-4 text-right align-middle">
-          {task.status === "pending_review" ? (
+          {canManageTasks && task.status === "pending_review" ? (
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => onApprove(task)} disabled={reviewActionId === task.id}
                 className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -457,16 +798,21 @@ function TaskTableRow({
               </button>
             </div>
           ) : (
+            // A plain Project Manager joins this exact same kebab menu —
+            // the shared fixed-position dropdown below only ever offers
+            // this actor "Edit Task" (never Delete, never Approve/Assign
+            // Back — those stay Owner/Admin/Team-Manager only, unaffected).
             <button
               type="button"
               onClick={(e) => onToggleMenu(e, task.id)}
+              aria-label="Task actions"
               className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"
             >
               <ThreeDotsIcon />
             </button>
           )}
         </td>
-      )}
+      ) : null}
     </tr>
   );
 }
@@ -500,6 +846,30 @@ export default function TasksPage() {
   // inline edit/delete/status/assignee controls that 403 on click.
   const hasProjectManagerAccess = user?.role === "project_manager" || Boolean(user?.is_project_manager);
   const canViewAllTasksTab = canManageTasks || hasProjectManagerAccess;
+  // Project Manager Task-delegation follow-up: the exact "plain Project
+  // Manager" actor this feature targets — PM capability WITHOUT any
+  // Owner/Admin/Team-Manager capability. A hybrid user (PM+Admin,
+  // PM+Owner, PM+Team Manager) keeps the existing full Create Task modal
+  // below (canManageTasks), never this restricted one — capability, not
+  // primary-role text, decides this, matching the backend's identical
+  // `is_plain_project_manager` derivation in create_task().
+  const isPlainProjectManager = hasProjectManagerAccess && !canManageTasks;
+
+  // Project Manager Task-update follow-up: `canManageTasks` conflated two
+  // genuinely different authorities — "may edit this task's core details"
+  // and "may assign/reassign an individual person to it." A plain Project
+  // Manager now has the first but never the second, so the single flag no
+  // longer describes every row correctly. `canManageTasks` keeps its EXACT
+  // original meaning below (Owner/Admin/Team Manager only — individual-
+  // assignee authority is unchanged, e.g. the Assignee cell/field stays
+  // gated on it alone); `canEditTaskDetails` adds a plain PM on top for
+  // everything else (title, description, priority, status, dates, team).
+  // Every task a PM sees here is already server-scoped to a project they
+  // manage (My Tasks / All Tasks both query through the same backend
+  // authorization this mirrors), so this never needs a per-row permission
+  // check or extra request — a PM may treat every row in front of them as
+  // editable-for-details.
+  const canEditTaskDetails = canManageTasks || isPlainProjectManager;
 
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -533,12 +903,34 @@ export default function TasksPage() {
   const [users,    setUsers]    = useState([]);
   const [projects, setProjects] = useState([]);
   const [teams,    setTeams]    = useState([]);
+  // Team Manager Create-Task-form follow-up: project_id -> the subset of
+  // THIS caller's own managed Teams attached to it (from GET
+  // /projects/for-managed-teams) — used as the classic Create/Edit Task
+  // modal's Project->Team fallback whenever GET /projects/{id}/items is
+  // blocked for the current actor (a plain Team Manager).
+  const [managedTeamProjectMap, setManagedTeamProjectMap] = useState({});
 
   // Loading / error
   const [myTasksLoading,  setMyTasksLoading]  = useState(true);
   const [allTasksLoading, setAllTasksLoading] = useState(false);
   const [myTasksError,    setMyTasksError]    = useState("");
   const [allTasksError,   setAllTasksError]   = useState("");
+
+  // Project Manager Task-update follow-up / duplicate-toast fix: a task
+  // whose id is in this set has an inline quick-mutation (status/priority/
+  // date) already in flight — the row disables that control until it
+  // settles, so a repeated click (or a slow/failing request) can never
+  // fire a second identical PATCH and therefore can never produce a
+  // second identical toast. This is plain double-submit protection, not
+  // error suppression: a genuine failure still toasts exactly once.
+  const [pendingTaskIds, setPendingTaskIds] = useState(() => new Set());
+  function markTaskPending(taskId, isPending) {
+    setPendingTaskIds((prev) => {
+      const next = new Set(prev);
+      if (isPending) next.add(taskId); else next.delete(taskId);
+      return next;
+    });
+  }
 
   // My Tasks filters
   const [myFilters, setMyFilters] = useState({ search: "", status: "all", priority: "all", overdue: false });
@@ -556,12 +948,19 @@ export default function TasksPage() {
   const [isSubmitting,   setIsSubmitting]   = useState(false);
   const [formError,      setFormError]      = useState("");
   const [openMenuId,     setOpenMenuId]     = useState(null);
+  // Project Manager Task-delegation follow-up: which of the two PM
+  // creation modes is open — "self" ("+ Add My Task": personal work,
+  // fixed to the PM, no Team) or "project_team" ("+ Add Project Task":
+  // delegated to a Team, no individual Assignee at all). `null` means
+  // the classic full Owner/Admin/Team-Manager modal is in play instead
+  // (or no modal is open) — these two flows are rendered by entirely
+  // separate JSX below, never sharing stale field state.
+  const [pmCreateMode, setPmCreateMode] = useState(null);
+  const [pmModalProjectTeams, setPmModalProjectTeams] = useState([]);
+  const [isPmModalTeamsLoading, setIsPmModalTeamsLoading] = useState(false);
   const [menuPos,        setMenuPos]        = useState(null);
   const [reviewActionId, setReviewActionId] = useState(null);
   const [celebrationData,setCelebrationData]= useState(null);
-
-  // Calendar
-  const [calDate, setCalDate] = useState(new Date());
 
   const isEditing = editingTaskId !== null;
 
@@ -605,14 +1004,29 @@ export default function TasksPage() {
     // Settled independently (never Promise.all) so one endpoint a role
     // isn't permitted to call can't also blank out the Project/Team
     // filter options this role DOES have legitimate access to.
-    const [userResult, projectResult, teamResult] = await Promise.allSettled([
+    // Team Manager Create-Task-form follow-up: GET /projects/for-managed-teams
+    // is the scoped, additive source for a plain Team Manager (whose GET
+    // /projects is always empty by design) — settled independently too, so
+    // it never blanks out the org-wide `projects` result for Owner/Admin/PM.
+    const [userResult, projectResult, teamResult, managedTeamProjectResult] = await Promise.allSettled([
       canManageTasks ? userApi.list() : Promise.resolve([]),
       projectApi.list(),
       teamApi.list(),
+      projectApi.listForManagedTeams(),
     ]);
     if (userResult.status === "fulfilled") setUsers(userResult.value);
-    if (projectResult.status === "fulfilled") setProjects(projectResult.value);
     if (teamResult.status === "fulfilled") setTeams(teamResult.value);
+
+    const baseProjects = projectResult.status === "fulfilled" ? projectResult.value : [];
+    const managedTeamProjects = managedTeamProjectResult.status === "fulfilled" ? managedTeamProjectResult.value : [];
+    if (managedTeamProjects.length) {
+      const merged = new Map(baseProjects.map((p) => [p.id, p]));
+      for (const p of managedTeamProjects) if (!merged.has(p.id)) merged.set(p.id, p);
+      setProjects(Array.from(merged.values()));
+      setManagedTeamProjectMap(Object.fromEntries(managedTeamProjects.map((p) => [p.id, p.team_ids])));
+    } else if (projectResult.status === "fulfilled") {
+      setProjects(baseProjects);
+    }
   }
 
   // Bulk Working Time for both task tables on this page — ONE request per
@@ -690,33 +1104,10 @@ export default function TasksPage() {
     [filteredMyTasks]
   );
 
-  const myTasksByDueDate = useMemo(() =>
-    filteredMyTasks.reduce((acc, t) => {
-      if (!t.due_date) return acc;
-      (acc[t.due_date] = acc[t.due_date] || []).push(t);
-      return acc;
-    }, {}),
-    [filteredMyTasks]
-  );
-
   const groupedByStatus = useMemo(() =>
     STATUS_OPTIONS.reduce((acc, s) => { acc[s.value] = filteredAllTasks.filter((t) => t.status === s.value); return acc; }, {}),
     [filteredAllTasks]
   );
-
-  const tasksByDueDate = useMemo(() =>
-    filteredAllTasks.reduce((acc, t) => {
-      if (!t.due_date) return acc;
-      (acc[t.due_date] = acc[t.due_date] || []).push(t);
-      return acc;
-    }, {}),
-    [filteredAllTasks]
-  );
-
-  const [myCalDate, setMyCalDate] = useState(new Date());
-  const myCalDays = useMemo(() => getMonthMatrix(myCalDate.getFullYear(), myCalDate.getMonth()), [myCalDate]);
-
-  const calDays = useMemo(() => getMonthMatrix(calDate.getFullYear(), calDate.getMonth()), [calDate]);
 
   // ─── Filter options (for All Tasks dropdowns) ───────────────────────────────
 
@@ -758,13 +1149,75 @@ export default function TasksPage() {
   useEffect(() => {
     const teamId = formData.team_id;
     Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
-      .then((members) => setTeamAssignableUsers(Array.isArray(members) ? members : []))
+      .then((members) => {
+        const list = Array.isArray(members) ? members : [];
+        setTeamAssignableUsers(list);
+        // Team Manager Create-Task-form follow-up: changing Team must
+        // clear/revalidate an Assignee who doesn't belong to the newly
+        // selected Team — never silently leave a stale, now-invalid
+        // assignee_id in the form.
+        if (teamId) {
+          setFormData((p) => (
+            p.assignee_id && p.team_id === teamId && !list.some((u) => String(u.id) === String(p.assignee_id))
+              ? { ...p, assignee_id: "" }
+              : p
+          ));
+        }
+      })
       .catch(() => setTeamAssignableUsers([]));
   }, [formData.team_id]);
 
   // The dropdown's actual option source: Team eligibility wins whenever a
   // team is selected (Rule B/C precedence), org-wide list otherwise.
   const modalAssignees = formData.team_id ? teamAssignableUsers : assignees;
+
+  // Team Manager Create-Task-form follow-up: Project->Team dependency.
+  // null = no restriction (no Project selected, or the source couldn't
+  // resolve one way or the other yet) — Team dropdown then shows every
+  // Team this actor already has (Owner/Admin: every org Team; Team
+  // Manager: their own managed Teams, from the existing, already-correct
+  // GET /teams). A non-null array narrows the Team dropdown to exactly
+  // that Project's attached Teams.
+  const [modalProjectTeamIds, setModalProjectTeamIds] = useState(null);
+  useEffect(() => {
+    const projectId = formData.project_id;
+    if (!projectId) { setModalProjectTeamIds(null); return; }
+    let cancelled = false;
+    projectApi.listItems(projectId)
+      .then((items) => {
+        if (cancelled) return;
+        setModalProjectTeamIds((items?.teams || []).map((t) => t.id));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // GET /projects/{id}/items is blocked for a plain Team Manager
+        // (require_project_management_access) — fall back to the
+        // Team-scoped source: which of THIS caller's own managed Teams
+        // (already fetched alongside `projects`) is attached to this
+        // exact Project. Never an unrelated Team.
+        setModalProjectTeamIds(managedTeamProjectMap[projectId] || []);
+      });
+    return () => { cancelled = true; };
+  }, [formData.project_id, managedTeamProjectMap]);
+
+  // Team Manager Create-Task-form follow-up: changing Project must
+  // clear/revalidate an incompatible Team selection (which, via the
+  // effect above, cascades into clearing an incompatible Assignee too).
+  useEffect(() => {
+    if (modalProjectTeamIds === null) return;
+    setFormData((p) => (
+      p.team_id && !modalProjectTeamIds.some((id) => String(id) === String(p.team_id))
+        ? { ...p, team_id: "" }
+        : p
+    ));
+  }, [modalProjectTeamIds]);
+
+  // The classic modal's actual Team option source — every Team this actor
+  // already has (unchanged) when no Project is selected yet, or hasn't
+  // resolved a restriction; the Project-scoped intersection otherwise.
+  const modalTeamOptions = modalProjectTeamIds === null
+    ? teams
+    : teams.filter((t) => modalProjectTeamIds.some((id) => String(id) === String(t.id)));
 
   // Inline-assignee-dropdown bug-fix follow-up: the INLINE quick-assignee
   // `<Select>` in the "All Tasks" table (unlike the Create/Edit modal
@@ -819,13 +1272,13 @@ export default function TasksPage() {
   }
 
   function getStatusOptionsForTask(task) {
-    if (canManageTasks) return STATUS_OPTIONS;
+    if (canEditTaskDetails) return STATUS_OPTIONS;
     if (task.status === "pending_review" || task.status === "done") return STATUS_OPTIONS.filter((o) => o.value === task.status);
     return TEAM_MEMBER_STATUS_OPTIONS;
   }
 
   function canChangeStatus(task) {
-    if (canManageTasks) return true;
+    if (canEditTaskDetails) return true;
     return isTeamMember && task.assignee_id === user?.id && task.status !== "pending_review" && task.status !== "done";
   }
 
@@ -840,6 +1293,11 @@ export default function TasksPage() {
     setFormData(initialForm);
     setEditingTaskId(null);
     setFormError("");
+    // Create-modal state-isolation follow-up: never let a Team/Project
+    // picked in one PM creation mode leak into the other, or into the
+    // classic modal, on the next open.
+    setPmCreateMode(null);
+    setPmModalProjectTeams([]);
   }
 
   function openCreateModal() {
@@ -848,6 +1306,20 @@ export default function TasksPage() {
     setIsModalOpen(true);
     // No specific task exists yet to be "this"/"it" — clear any stale
     // context left over from a previously-edited task.
+    clearPageContext();
+  }
+
+  // Project Manager Task-delegation follow-up: `mode` is "self" (+ Add My
+  // Task) or "project_team" (+ Add Project Task) — it only ever selects
+  // which restricted FORM renders and which fixed invariant the submit
+  // handler sends; it grants no privilege of its own; the backend
+  // independently re-derives and enforces the same rule from the
+  // authenticated actor's own capability, never trusting this UI state.
+  function openPmCreateModal(mode) {
+    resetForm();
+    setPmCreateMode(mode);
+    setOpenMenuId(null);
+    setIsModalOpen(true);
     clearPageContext();
   }
 
@@ -879,6 +1351,59 @@ export default function TasksPage() {
     // Architecture item 9 — announce that the user is now looking at this
     // specific task, so "mark this done" in chat resolves to it.
     setPageContext("task", task.id);
+
+    // Project Manager Task-update follow-up: the PM edit modal's Team
+    // dropdown must only offer Teams already attached to THIS task's
+    // Project (same rule the backend's `update_task` re-derives and
+    // enforces independently via `list_project_team_ids` — this is just
+    // the honest UI for it), never an arbitrary org team.
+    if (isPlainProjectManager && task.project_id) {
+      setIsPmModalTeamsLoading(true);
+      projectApi.listItems(task.project_id)
+        .then((items) => setPmModalProjectTeams(items?.teams || []))
+        .catch(() => setPmModalProjectTeams([]))
+        .finally(() => setIsPmModalTeamsLoading(false));
+    } else if (isPlainProjectManager) {
+      setPmModalProjectTeams([]);
+    }
+  }
+
+  // Project Manager Task-update follow-up: the full task object behind
+  // `editingTaskId` — needed to show the (read-only) current assignee's
+  // name in the PM edit modal, which `formData` alone doesn't carry.
+  const editingTask = useMemo(() => {
+    if (editingTaskId === null) return null;
+    return myTasks.find((t) => t.id === editingTaskId) || allTasks.find((t) => t.id === editingTaskId) || null;
+  }, [editingTaskId, myTasks, allTasks]);
+
+  async function handlePmEditSubmit(e) {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setFormError("");
+    try {
+      // Strict whitelist matching the backend's PM_ALLOWED_TASK_UPDATE_FIELDS
+      // — assignee_id and project_id are never sent, not even the task's
+      // own current (unchanged) value, so a PM's PATCH can never be
+      // mistaken for an assignment attempt.
+      const payload = {
+        name:        formData.name,
+        description: formData.description || null,
+        start_date:  formData.start_date || null,
+        due_date:    formData.due_date   || null,
+        status:      formData.status,
+        priority:    formData.priority,
+        team_id:     formData.team_id ? Number(formData.team_id) : null,
+      };
+      const updated = await taskApi.update(editingTaskId, payload);
+      updateTaskInLists(updated);
+      toast.success("Task updated.");
+      closeModal();
+    } catch (err) {
+      setFormError(err.message || "Unable to save task.");
+      toast.error(err.message || "Unable to save task.");
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   async function handleSubmit(e) {
@@ -918,6 +1443,81 @@ export default function TasksPage() {
     }
   }
 
+  // Project Manager Task-delegation follow-up: Project → Team cascade.
+  // Only relevant to the "project_team" PM mode — refetches this exact
+  // Project's attached Teams (the same GET /projects/{id}/items a
+  // Project Manager already has legitimate read access to; never
+  // GET /teams, which is empty for a plain PM) every time the selected
+  // Project changes, and clears any Team selection that doesn't belong
+  // to the new Project — never silently carries a Team over from the
+  // previous Project.
+  useEffect(() => {
+    // Skip entirely while editing an existing task — handleEdit already
+    // loads this task's project-scoped Teams itself (the task's project
+    // never changes during a PM edit, since project_id isn't one of the
+    // fields this form lets a PM touch), so this effect would otherwise
+    // immediately clear that result right after it loads.
+    if (isEditing || pmCreateMode !== "project_team" || !formData.project_id) {
+      if (!isEditing) setPmModalProjectTeams([]);
+      return;
+    }
+    let cancelled = false;
+    setIsPmModalTeamsLoading(true);
+    projectApi.listItems(formData.project_id)
+      .then((items) => {
+        if (cancelled) return;
+        const projectTeamOptions = items?.teams || [];
+        setPmModalProjectTeams(projectTeamOptions);
+        setFormData((current) => {
+          if (current.team_id && !projectTeamOptions.some((t) => String(t.id) === String(current.team_id))) {
+            return { ...current, team_id: "" };
+          }
+          return current;
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setPmModalProjectTeams([]);
+      })
+      .finally(() => {
+        if (!cancelled) setIsPmModalTeamsLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [pmCreateMode, formData.project_id]);
+
+  async function handlePmSubmit(e) {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setFormError("");
+    try {
+      const basePayload = {
+        name:        formData.name,
+        description: formData.description || null,
+        start_date:  formData.start_date || null,
+        due_date:    formData.due_date   || null,
+        project_id:  formData.project_id ? Number(formData.project_id) : null,
+        priority:    formData.priority,
+      };
+      // The backend independently enforces both invariants below
+      // (create_task's is_plain_project_manager branch) — this is not
+      // the security boundary, just the honest request a correctly-built
+      // UI sends for each mode.
+      const payload = pmCreateMode === "self"
+        ? { ...basePayload, team_id: null, assignee_id: user?.id ? Number(user.id) : null }
+        : { ...basePayload, team_id: formData.team_id ? Number(formData.team_id) : null, assignee_id: null };
+
+      const created = await taskApi.create(payload);
+      if (created.assignee_id === user?.id) setMyTasks((p) => [created, ...p]);
+      setAllTasks((p) => [created, ...p]);
+      toast.success(pmCreateMode === "self" ? "Task created." : "Project task created and delegated to the team.");
+      closeModal();
+    } catch (err) {
+      setFormError(err.message || "Unable to save task.");
+      toast.error(err.message || "Unable to save task.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function handleDelete(task) {
     setOpenMenuId(null);
     if (!(await confirm({ message: `Delete "${task.name}"?`, tone: "danger", confirmLabel: "Delete" }))) return;
@@ -932,38 +1532,98 @@ export default function TasksPage() {
   }
 
   async function quickStatusUpdate(task, newStatus) {
+    // Team Manager Task-update-scope bug fix / duplicate-request follow-up:
+    // `pendingTaskIds` is the actual guard against a double-fire for this
+    // exact task (a second click, or the same task rendered in both the
+    // My Tasks and All Tasks sections at once, sharing this one Set keyed
+    // by task.id) — it disables both rendered controls for this task id
+    // the instant the first request starts, so at most one PATCH is ever
+    // in flight per task. This early return is that guard, not a cosmetic
+    // debounce.
+    if (pendingTaskIds.has(task.id)) return;
     setOpenMenuId(null);
+    markTaskPending(task.id, true);
+    // A stable per-task toast id: if a duplicate-toast path is ever
+    // reintroduced (or the two list sections above both attempt the same
+    // change), react-hot-toast replaces the existing toast with this id
+    // instead of stacking a second one — the underlying request is still
+    // deduplicated by pendingTaskIds above; this only guarantees the UI
+    // never SHOWS two notifications for what is, at most, one real
+    // network request.
+    const toastId = `task-status-${task.id}`;
     try {
-      const updated = await taskApi.updateStatus(task.id, newStatus);
+      // Project Manager Task-update follow-up: PATCH /tasks/{id}/status
+      // (`update_task_status`) used to have its own bespoke, narrower
+      // authorization (only TEAM_MEMBER self-service or Owner/Admin) —
+      // now fixed to share the same canonical `require_task_update_access`
+      // gate `PATCH /tasks/{id}` uses (Team Manager scoped to a Team they
+      // manage, the actual assignee, Owner/Admin, or a Project-Manager-
+      // scoped Project member), so every role's quick status change can
+      // go through `updateStatus` again. A plain Project Manager still
+      // routes through `update()` here — `update_task_status` was never
+      // extended with PM's own field-whitelist/Done semantics, and
+      // `update_task` already implements and tests those identically, so
+      // duplicating them into the status endpoint would just be a second,
+      // parallel implementation of the same rule.
+      const updated = isPlainProjectManager
+        ? await taskApi.update(task.id, { status: newStatus })
+        : await taskApi.updateStatus(task.id, newStatus);
       updateTaskInLists(updated);
       if (updated.status === "done") {
         const isSelf = task.assignee_id === user?.id;
         setCelebrationData({ taskName: updated.name, completedByName: isSelf ? null : (task.assignee?.full_name || null) });
       } else {
-        toast.success("Status updated.");
+        toast.success("Status updated.", { id: toastId });
       }
     } catch (err) {
-      toast.error(err.message || "Unable to update status.");
+      toast.error(err.message || "Unable to update status.", { id: toastId });
+    } finally {
+      markTaskPending(task.id, false);
     }
   }
 
   async function quickPriorityUpdate(task, newPriority) {
+    if (pendingTaskIds.has(task.id)) return;
+    markTaskPending(task.id, true);
     try {
       const updated = await taskApi.update(task.id, { priority: newPriority });
       updateTaskInLists(updated);
       toast.success("Priority updated.");
     } catch (err) {
       toast.error(err.message || "Unable to update priority.");
+    } finally {
+      markTaskPending(task.id, false);
+    }
+  }
+
+  // Project Manager Task-update follow-up: Start/Due Date inline editors —
+  // both fields are on `PM_ALLOWED_TASK_UPDATE_FIELDS`, so this is just
+  // `taskApi.update()` with a single field, same as priority above.
+  async function quickDateUpdate(task, field, newValue) {
+    if (pendingTaskIds.has(task.id)) return;
+    markTaskPending(task.id, true);
+    try {
+      const updated = await taskApi.update(task.id, { [field]: newValue || null });
+      updateTaskInLists(updated);
+      toast.success(field === "start_date" ? "Start date updated." : "Due date updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update date.");
+    } finally {
+      markTaskPending(task.id, false);
     }
   }
 
   async function quickAssigneeUpdate(task, newAssigneeId) {
+    if (pendingTaskIds.has(task.id)) return;
+    markTaskPending(task.id, true);
     try {
       const updated = await taskApi.update(task.id, { assignee_id: newAssigneeId ? Number(newAssigneeId) : null });
       updateTaskInLists(updated);
       toast.success("Assignee updated.");
     } catch (err) {
       toast.error(err.message || "Unable to update assignee.");
+    } finally {
+      markTaskPending(task.id, false);
     }
   }
 
@@ -1074,12 +1734,28 @@ export default function TasksPage() {
           <h1 className="text-3xl font-bold text-slate-900">Tasks</h1>
           <p className="mt-1 text-sm text-slate-500">Create, assign, and track project tasks.</p>
         </div>
-        {canManageTasks && (
+        {canManageTasks ? (
           <button type="button" onClick={openCreateModal}
             className="w-fit rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
             + Add Task
           </button>
-        )}
+        ) : isPlainProjectManager ? (
+          // Project Manager Task-delegation follow-up: this action is
+          // page-level — it stays visible across List/Board/Calendar
+          // (unaffected by `viewMode`) and only its label/mode switches
+          // with the active primary tab.
+          primaryTab === "my_tasks" ? (
+            <button type="button" onClick={() => openPmCreateModal("self")}
+              className="w-fit rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+              + Add My Task
+            </button>
+          ) : (
+            <button type="button" onClick={() => openPmCreateModal("project_team")}
+              className="w-fit rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800">
+              + Add Project Task
+            </button>
+          )
+        ) : null}
       </div>
 
       {/* Primary tabs */}
@@ -1173,7 +1849,7 @@ export default function TasksPage() {
                             <tr key={task.id} className={getDueRowClassName(task)}>
                               <td className="px-4 py-4 align-middle">
                                 <button type="button"
-                                  disabled={task.status === "pending_review"}
+                                  disabled={pendingTaskIds.has(task.id) || task.status === "pending_review"}
                                   onClick={() => quickStatusUpdate(task, task.status === "done" ? "todo" : "done")}
                                   className={
                                     task.status === "done"
@@ -1190,8 +1866,8 @@ export default function TasksPage() {
                                 {task.review_note && <p className="mt-1 text-xs text-amber-600">Note: {task.review_note}</p>}
                               </td>
                               <td className="px-4 py-4 align-middle">
-                                {canManageTasks ? (
-                                  <Select value={task.priority || "medium"} onChange={(e) => quickPriorityUpdate(task, e.target.value)}
+                                {canEditTaskDetails ? (
+                                  <Select value={task.priority || "medium"} disabled={pendingTaskIds.has(task.id)} onChange={(e) => quickPriorityUpdate(task, e.target.value)}
                                     className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none">
                                     {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                                   </Select>
@@ -1202,12 +1878,30 @@ export default function TasksPage() {
                               <td className="px-4 py-4 align-middle text-slate-700">{task.project?.name || "—"}</td>
                               <td className="px-4 py-4 align-middle text-slate-700">{task.team?.name || "—"}</td>
                               <td className="px-4 py-4 align-middle text-slate-700">
-                                {task.start_date ? formatDate(task.start_date) : <span className="text-slate-400">—</span>}
+                                {canEditTaskDetails ? (
+                                  <DatePicker
+                                    value={task.start_date || ""}
+                                    disabled={pendingTaskIds.has(task.id)}
+                                    onChange={(e) => quickDateUpdate(task, "start_date", e.target.value)}
+                                  />
+                                ) : task.start_date ? formatDate(task.start_date) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
                               </td>
-                              <td className="px-4 py-4 align-middle"><DueDateCell task={task} /></td>
+                              <td className="px-4 py-4 align-middle">
+                                {canEditTaskDetails ? (
+                                  <DatePicker
+                                    value={task.due_date || ""}
+                                    disabled={pendingTaskIds.has(task.id)}
+                                    onChange={(e) => quickDateUpdate(task, "due_date", e.target.value)}
+                                  />
+                                ) : (
+                                  <DueDateCell task={task} />
+                                )}
+                              </td>
                               <td className="px-4 py-4 align-middle">
                                 {canChangeStatus(task) ? (
-                                  <Select value={task.status} onChange={(e) => quickStatusUpdate(task, e.target.value)}
+                                  <Select value={task.status} disabled={pendingTaskIds.has(task.id)} onChange={(e) => quickStatusUpdate(task, e.target.value)}
                                     className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-900 focus:outline-none">
                                     {getStatusOptionsForTask(task).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
                                   </Select>
@@ -1227,8 +1921,8 @@ export default function TasksPage() {
                                 />
                               </td>
                               <td className="px-4 py-4 text-right align-middle">
-                                {canManageTasks && (
-                                  task.status === "pending_review" ? (
+                                {canEditTaskDetails ? (
+                                  canManageTasks && task.status === "pending_review" ? (
                                     <div className="flex justify-end gap-2">
                                       <button type="button" onClick={() => approveTask(task)} disabled={reviewActionId === task.id}
                                         className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -1240,12 +1934,16 @@ export default function TasksPage() {
                                       </button>
                                     </div>
                                   ) : (
-                                    <button type="button" onClick={(e) => handleMenuToggle(e, task.id)}
+                                    // A plain Project Manager joins this same
+                                    // kebab menu — the shared fixed-position
+                                    // dropdown only ever offers this actor
+                                    // "Edit Task" (never Delete).
+                                    <button type="button" onClick={(e) => handleMenuToggle(e, task.id)} aria-label="Task actions"
                                       className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100">
                                       <ThreeDotsIcon />
                                     </button>
                                   )
-                                )}
+                                ) : null}
                               </td>
                             </tr>
                           )) : (
@@ -1267,8 +1965,10 @@ export default function TasksPage() {
                         key={task.id}
                         task={task}
                         canManageTasks={false}
+                        canEditTaskDetails={canEditTaskDetails}
                         isTeamMember={isTeamMember}
                         user={user}
+                        onEdit={handleEdit}
                         onStatusChange={quickStatusUpdate}
                         onApprove={approveTask}
                         onAssignBack={assignBackTask}
@@ -1338,59 +2038,16 @@ export default function TasksPage() {
 
           {/* ── CALENDAR ── */}
           {myViewMode === "calendar" && (
-            <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => setMyCalDate(new Date(myCalDate.getFullYear(), myCalDate.getMonth() - 1, 1))}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">‹</button>
-                  <button type="button" onClick={() => setMyCalDate(new Date())}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Today</button>
-                  <button type="button" onClick={() => setMyCalDate(new Date(myCalDate.getFullYear(), myCalDate.getMonth() + 1, 1))}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">›</button>
-                </div>
-                <h2 className="text-lg font-semibold text-slate-900">
-                  {myCalDate.toLocaleString("default", { month: "long", year: "numeric" })}
-                </h2>
-              </div>
-              <div className="overflow-x-auto">
-                <div className="min-w-[700px]">
-                  <div className="grid grid-cols-7 border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                    {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) => (
-                      <div key={d} className="border-r border-slate-200 p-3">{d}</div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-7">
-                    {myCalDays.map((day) => {
-                      const key = toDateInputValue(day);
-                      const dayTasks = myTasksByDueDate[key] || [];
-                      const isCurrent = day.getMonth() === myCalDate.getMonth();
-                      return (
-                        <div key={key} className={`min-h-28 border-r border-b border-slate-200 p-2 ${isCurrent ? "" : "bg-slate-50 text-slate-400"}`}>
-                          <div className="mb-2 flex items-center justify-between">
-                            <span className="text-sm font-semibold">{day.getDate()}</span>
-                            {dayTasks.length > 0 && (
-                              <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">{dayTasks.length}</span>
-                            )}
-                          </div>
-                          <div className="space-y-1">
-                            {dayTasks.slice(0, 3).map((task) => (
-                              <div key={task.id}
-                                className={
-                                  task.status === "pending_review" ? "block w-full truncate rounded bg-amber-100 px-2 py-1 text-left text-xs font-medium text-amber-900"
-                                  : task.status === "done" ? "block w-full truncate rounded bg-green-100 px-2 py-1 text-left text-xs font-medium text-green-900 line-through"
-                                  : "block w-full truncate rounded bg-teal-100 px-2 py-1 text-left text-xs font-medium text-teal-900"
-                                }
-                              >{task.name}</div>
-                            ))}
-                            {dayTasks.length > 3 && <p className="text-xs text-slate-500">+{dayTasks.length - 3} more</p>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
+            <TaskCalendar
+              tasks={filteredMyTasks}
+              filtersActive={myFiltersActive}
+              // My Tasks is visible to every role (Team Member/Client
+              // included), unlike All Tasks below — only pass a click
+              // handler when this actor actually has an Edit Task entry
+              // point elsewhere on this page (List/Board already agree:
+              // neither gives a plain Team Member/Client one either).
+              onTaskClick={(canManageTasks || isPlainProjectManager) ? handleEdit : null}
+            />
           )}
         </>
       )}
@@ -1504,15 +2161,18 @@ export default function TasksPage() {
                               task={task}
                               reviewActionId={reviewActionId}
                               canManageTasks={canManageTasks}
+                              canEditTaskDetails={canEditTaskDetails}
                               isTeamMember={isTeamMember}
                               userId={user?.id}
                               assignees={assignees}
                               onQuickStatus={quickStatusUpdate}
                               onQuickPriority={quickPriorityUpdate}
                               onQuickAssignee={quickAssigneeUpdate}
+                              onQuickDate={quickDateUpdate}
                               onApprove={approveTask}
                               onAssignBack={assignBackTask}
                               onToggleMenu={handleMenuToggle}
+                              isPending={pendingTaskIds.has(task.id)}
                               workingTime={taskWorkingTimes[task.id]}
                               currentUserHasActiveTimer={currentUserHasActiveTimer}
                               onTimeChange={refreshTaskWorkingTimes}
@@ -1538,6 +2198,7 @@ export default function TasksPage() {
                         key={task.id}
                         task={task}
                         canManageTasks={canManageTasks}
+                        canEditTaskDetails={canEditTaskDetails}
                         isTeamMember={isTeamMember}
                         user={user}
                         onEdit={handleEdit}
@@ -1586,7 +2247,7 @@ export default function TasksPage() {
                             <PriorityBadge priority={task.priority} />
                           </div>
                           <p className="mt-2 text-xs text-slate-500">Project: {task.project?.name || "—"}</p>
-                          <p className="mt-1 text-xs text-slate-500">Assignee: {task.assignee?.full_name || "—"}</p>
+                          <p className="mt-1 text-xs text-slate-500">Assignee: {task.assignee?.full_name || "Unassigned"}</p>
                           <p className="mt-1 text-xs text-slate-500">Team: {task.team?.name || "—"}</p>
                           <p className="mt-1 text-xs"><DueDateCell task={task} /></p>
                           {task.review_note && (
@@ -1629,59 +2290,7 @@ export default function TasksPage() {
 
           {/* ── CALENDAR view ──────────────────────────────────────────────── */}
           {viewMode === "calendar" && (
-            <section className="rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
-                <div className="flex items-center gap-2">
-                  <button type="button" onClick={() => setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() - 1, 1))}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">‹</button>
-                  <button type="button" onClick={() => setCalDate(new Date())}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Today</button>
-                  <button type="button" onClick={() => setCalDate(new Date(calDate.getFullYear(), calDate.getMonth() + 1, 1))}
-                    className="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">›</button>
-                </div>
-                <h2 className="text-lg font-semibold text-slate-900">
-                  {calDate.toLocaleString("default", { month: "long", year: "numeric" })}
-                </h2>
-              </div>
-              <div className="overflow-x-auto">
-                <div className="min-w-[700px]">
-                  <div className="grid grid-cols-7 border-b border-slate-200 text-xs font-semibold uppercase text-slate-500">
-                    {["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map((d) => (
-                      <div key={d} className="border-r border-slate-200 p-3">{d}</div>
-                    ))}
-                  </div>
-                  <div className="grid grid-cols-7">
-                    {calDays.map((day) => {
-                      const key = toDateInputValue(day);
-                      const dayTasks = tasksByDueDate[key] || [];
-                      const isCurrent = day.getMonth() === calDate.getMonth();
-                      return (
-                        <div key={key} className={`min-h-28 border-r border-b border-slate-200 p-2 ${isCurrent ? "" : "bg-slate-50 text-slate-400"}`}>
-                          <div className="mb-2 flex items-center justify-between">
-                            <span className="text-sm font-semibold">{day.getDate()}</span>
-                            {dayTasks.length > 0 && (
-                              <span className="rounded-full bg-slate-900 px-2 py-0.5 text-xs font-semibold text-white">{dayTasks.length}</span>
-                            )}
-                          </div>
-                          <div className="space-y-1">
-                            {dayTasks.slice(0, 3).map((task) => (
-                              <button key={task.id} type="button" onClick={() => handleEdit(task)}
-                                className={
-                                  task.status === "pending_review" ? "block w-full truncate rounded bg-amber-100 px-2 py-1 text-left text-xs font-medium text-amber-900"
-                                  : task.status === "done" ? "block w-full truncate rounded bg-green-100 px-2 py-1 text-left text-xs font-medium text-green-900 line-through"
-                                  : "block w-full truncate rounded bg-teal-100 px-2 py-1 text-left text-xs font-medium text-teal-900"
-                                }
-                              >{task.name}</button>
-                            ))}
-                            {dayTasks.length > 3 && <p className="text-xs text-slate-500">+{dayTasks.length - 3} more</p>}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
+            <TaskCalendar tasks={filteredAllTasks} filtersActive={allFiltersActive} onTaskClick={handleEdit} />
           )}
         </>
       )}
@@ -1695,12 +2304,18 @@ export default function TasksPage() {
         >
           <button type="button" onClick={() => { setMenuPos(null); handleEdit(openMenuTask); }}
             className="block w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50">
-            Edit
+            Edit Task
           </button>
-          <button type="button" onClick={() => { setMenuPos(null); handleDelete(openMenuTask); }}
-            className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50">
-            Delete
-          </button>
+          {/* Project Manager Actions-menu follow-up: a plain PM joins this
+              exact menu (never a second one) but never gets Delete —
+              DELETE /tasks/{id} stays Owner/Admin/Team-Manager only,
+              unchanged; offering it here would just 403. */}
+          {canManageTasks && (
+            <button type="button" onClick={() => { setMenuPos(null); handleDelete(openMenuTask); }}
+              className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50">
+              Delete
+            </button>
+          )}
         </div>
       )}
 
@@ -1748,6 +2363,55 @@ export default function TasksPage() {
                   nothing to start a timer on until Create Task is saved. */}
               {isEditing && <TaskTimeTracker taskId={editingTaskId} onTimeChange={refreshTaskWorkingTimes} />}
 
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>
+                <Select name="project_id" value={formData.project_id} onChange={handleChange}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                  <option value="">No project</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </div>
+
+              {/* Team Manager Create-Task-form follow-up: narrowed to the
+                  selected Project's attached Teams once one is picked
+                  (Owner/Admin: that Project's real attached Teams via GET
+                  /projects/{id}/items; a plain Team Manager: the subset of
+                  THEIR OWN managed Teams attached to it) — every Team this
+                  actor already has otherwise. */}
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Team</label>
+                <Select name="team_id" value={formData.team_id} onChange={handleChange}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                  <option value="">Select team</option>
+                  {modalTeamOptions.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </Select>
+              </div>
+
+              {/* Managers/admins can assign a task directly on creation, not
+                  just when editing — leave unassigned to land it in the
+                  team's To-Do list instead. Assigning to yourself is just
+                  picking your own name here, same as anyone else. Defaults
+                  to Unassigned, and is scoped to the selected Team's
+                  eligible members once one is picked (see modalAssignees). */}
+              {canManageTasks && (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
+                  <Select
+                    name="assignee_id"
+                    value={formData.assignee_id}
+                    onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Unassigned</option>
+                    {modalAssignees.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.id === user?.id ? "Assign to me" : a.role ? `${a.full_name} — ${a.role}` : a.full_name}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
@@ -1776,45 +2440,248 @@ export default function TasksPage() {
                 </div>
               </div>
 
-              {/* Managers/admins can assign a task directly on creation, not
-                  just when editing — leave unassigned to land it in the
-                  team's To-Do list instead. Assigning to yourself is just
-                  picking your own name here, same as anyone else. */}
-              {canManageTasks && (
-                <div>
-                  <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
-                  <Select
-                    name="assignee_id"
-                    value={formData.assignee_id}
-                    onChange={handleChange}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                  >
-                    <option value="">Unassigned</option>
-                    {modalAssignees.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.id === user?.id ? "Assign to me" : a.role ? `${a.full_name} — ${a.role}` : a.full_name}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-              )}
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeModal}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button type="submit" disabled={isSubmitting}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
+                  {isSubmitting ? "Saving…" : isEditing ? "Update Task" : "Create Task"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Project Manager Task-delegation follow-up: two intentionally
+          SEPARATE, restricted create forms — never the classic modal
+          above (that one stays Owner/Admin/Team-Manager only, unchanged).
+          Neither form exposes an individual-assignee control at all; the
+          backend independently re-derives and enforces the same
+          invariant regardless of what this UI sends. */}
+      {isPlainProjectManager && isModalOpen && pmCreateMode && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">
+                  {pmCreateMode === "self" ? "Create My Task" : "Create Project Task"}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {pmCreateMode === "self"
+                    ? "Personal work you'll do yourself under one of your projects."
+                    : "Delegate work to a team on one of your projects — the team's manager assigns the individual owner."}
+                </p>
+              </div>
+              <button type="button" onClick={closeModal}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+
+            {formError && (
+              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
+            )}
+
+            <form onSubmit={handlePmSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Task name *</label>
+                <input name="name" value={formData.name} onChange={handleChange} required
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
 
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Project</label>
-                <Select name="project_id" value={formData.project_id} onChange={handleChange}
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea name="description" value={formData.description} onChange={handleChange}
+                  rows={4} placeholder="Add task details..."
+                  className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400" />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Project *</label>
+                <Select name="project_id" value={formData.project_id} onChange={handleChange} required
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
                   <option value="">Select project</option>
+                  {/* Project options are already scoped to exactly the
+                      Projects this Project Manager manages
+                      (ProjectMembership) — GET /projects returns only
+                      those for a plain PM; never org-wide. */}
                   {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </Select>
               </div>
 
+              {pmCreateMode === "project_team" ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Team *</label>
+                  {!formData.project_id ? (
+                    <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-400">
+                      Select a project first.
+                    </p>
+                  ) : isPmModalTeamsLoading ? (
+                    <p className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-400">
+                      Loading teams…
+                    </p>
+                  ) : pmModalProjectTeams.length === 0 ? (
+                    <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-500">
+                      No teams are assigned to this project.
+                    </p>
+                  ) : (
+                    <Select name="team_id" value={formData.team_id} onChange={handleChange} required
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                      <option value="">Select team</option>
+                      {pmModalProjectTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                    </Select>
+                  )}
+                  <p className="mt-1 text-xs text-slate-400">
+                    Only teams attached to the selected project — the team's manager will assign the individual owner.
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    You ({user?.full_name || "me"})
+                  </p>
+                </div>
+              )}
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                  <Select name="priority" value={formData.priority} onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </Select>
+                </div>
+                <div />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Start date</label>
+                  <DatePicker name="start_date" value={formData.start_date} onChange={handleChange} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Due date</label>
+                  <DatePicker name="due_date" value={formData.due_date} onChange={handleChange} />
+                </div>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={closeModal}
+                  className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-50">
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || (pmCreateMode === "project_team" && (!formData.project_id || pmModalProjectTeams.length === 0))}
+                  className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {isSubmitting ? "Saving…" : pmCreateMode === "self" ? "Create My Task" : "Create Project Task"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Project Manager Task-update follow-up: a THIRD, separate modal for
+          editing an EXISTING task — never the two create-only forms above.
+          Only the whitelisted fields are editable; Assignee is shown
+          read-only (never hidden — the PM should see who owns a delegated
+          task), and Project is not shown at all (immutable for a PM, per
+          the backend's own rejection of project_id in this actor's PATCH). */}
+      {isPlainProjectManager && isModalOpen && isEditing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-6">
+          <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-6 flex items-center justify-between">
+              <div>
+                <h2 className="text-xl font-semibold text-slate-900">Edit Task</h2>
+                <p className="mt-1 text-sm text-slate-500">Update this task's core details.</p>
+              </div>
+              <button type="button" onClick={closeModal}
+                className="rounded-lg px-3 py-2 text-sm font-semibold text-slate-500 hover:bg-slate-100">✕</button>
+            </div>
+
+            {formError && (
+              <div className="mb-5 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{formError}</div>
+            )}
+
+            <form onSubmit={handlePmEditSubmit} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Task name *</label>
+                <input name="name" value={formData.name} onChange={handleChange} required
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                <textarea name="description" value={formData.description} onChange={handleChange}
+                  rows={4} placeholder="Add task details..."
+                  className="w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm placeholder:text-slate-400" />
+              </div>
+
+              <TaskTimeTracker taskId={editingTaskId} onTimeChange={refreshTaskWorkingTimes} />
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
+                  <Select name="priority" value={formData.priority} onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    {PRIORITY_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </Select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
+                  <Select name="status" value={formData.status} onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </Select>
+                </div>
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Start date</label>
+                  <DatePicker name="start_date" value={formData.start_date} onChange={handleChange} />
+                </div>
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Due date</label>
+                  <DatePicker name="due_date" value={formData.due_date} onChange={handleChange} />
+                </div>
+              </div>
+
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Assignee</label>
+                {/* Read-only, never editable here — a Project Manager
+                    delegates a Task to a Team; the Team Manager decides
+                    the individual owner. Shown so the PM can see who
+                    currently owns it, not hidden entirely. */}
+                <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                  {editingTask?.assignee?.full_name || "Unassigned"}
+                </p>
+              </div>
+
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">Team</label>
-                <Select name="team_id" value={formData.team_id} onChange={handleChange}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                  <option value="">Select team</option>
-                  {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-                </Select>
+                {!editingTask?.project_id ? (
+                  <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-400">
+                    This task has no project.
+                  </p>
+                ) : isPmModalTeamsLoading ? (
+                  <p className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-400">
+                    Loading teams…
+                  </p>
+                ) : (
+                  <Select name="team_id" value={formData.team_id} onChange={handleChange}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
+                    <option value="">Unassigned</option>
+                    {pmModalProjectTeams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+                  </Select>
+                )}
+                <p className="mt-1 text-xs text-slate-400">
+                  Only teams attached to this project — changing the team never changes the current assignee.
+                </p>
               </div>
 
               <div className="flex gap-3 pt-2">
@@ -1824,7 +2691,7 @@ export default function TasksPage() {
                 </button>
                 <button type="submit" disabled={isSubmitting}
                   className="w-full rounded-lg bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60">
-                  {isSubmitting ? "Saving…" : isEditing ? "Update Task" : "Create Task"}
+                  {isSubmitting ? "Saving…" : "Update Task"}
                 </button>
               </div>
             </form>

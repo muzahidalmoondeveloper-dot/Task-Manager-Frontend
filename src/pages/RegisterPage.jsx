@@ -6,6 +6,7 @@ import { authApi } from "../api/authApi";
 import { invitationApi } from "../api/invitationApi";
 import { useAuth } from "../context/AuthContext";
 import { PasswordStrengthBar, PasswordRequirementsChecklist } from "../components/auth/PasswordRequirements";
+import { OTP_RESEND_COOLDOWN_SECONDS } from "../utils/otpConstants";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -233,7 +234,7 @@ export default function RegisterPage() {
       });
       toast.success(res.message || "OTP sent to your email.");
       setStep("otp");
-      setResendCooldown(30);
+      setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
       setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
     } catch (err) {
       toast.error(err.message || "Unable to register.");
@@ -517,8 +518,13 @@ export default function RegisterPage() {
                       try {
                         await authApi.resendOtp({ email: formData.email, purpose: "register" });
                         toast.success("A new code has been sent.");
-                        setResendCooldown(30);
+                        setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
                       } catch (err) {
+                        // The backend enforces the real cooldown
+                        // independently of this local timer — resync to
+                        // the actual remaining time when it rejects.
+                        const retryAfter = err.details?.retry_after_seconds;
+                        if (typeof retryAfter === "number") setResendCooldown(retryAfter);
                         toast.error(err.message || "Unable to resend code.");
                       }
                     }}

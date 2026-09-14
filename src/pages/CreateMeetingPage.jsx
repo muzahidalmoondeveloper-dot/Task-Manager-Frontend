@@ -5,7 +5,6 @@ import toast from "react-hot-toast";
 import DatePicker from "../components/DatePicker";
 import Select from "../components/Select";
 import { meetingApi } from "../api/meetingApi";
-import { userApi } from "../api/userApi";
 import { useAuth } from "../context/AuthContext";
 import { Avatar, AgendaSectionIcon } from "../components/meetings/meetingHelpers";
 import { MEETING_TYPE_PRESETS } from "../components/meetings/meetingConstants";
@@ -100,6 +99,7 @@ export default function CreateMeetingPage() {
   const [agendaSections, setAgendaSections] = useState(() => withLocalIds(MEETING_TYPE_PRESETS.level_10.agenda));
 
   const [orgUsers, setOrgUsers] = useState([]);
+  const [attendeesLoading, setAttendeesLoading] = useState(true);
   const [attendeeIds, setAttendeeIds] = useState(() => (user?.id ? [user.id] : []));
   const [attendeeToAdd, setAttendeeToAdd] = useState("");
 
@@ -118,7 +118,17 @@ export default function CreateMeetingPage() {
   const dragOver = useRef(null);
 
   useEffect(() => {
-    userApi.list().then(setOrgUsers).catch(() => {});
+    // Meeting Attendees follow-up: this used to call the org-wide GET
+    // /users (Owner/Admin only) directly — a plain Project Manager's
+    // request 403'd and was silently swallowed by the .catch() below,
+    // leaving "Select Attendee to Add" empty. The backend-scoped
+    // replacement returns exactly the users this actor may legitimately
+    // add (org-wide for Owner/Admin/Team Manager, managed-Project-scoped
+    // for a plain Project Manager) — never org-wide `/users` access.
+    meetingApi.listEligibleAttendees()
+      .then(setOrgUsers)
+      .catch(() => {})
+      .finally(() => setAttendeesLoading(false));
   }, []);
 
   function selectMeetingType(value) {
@@ -292,10 +302,15 @@ export default function CreateMeetingPage() {
           <Select
             value={attendeeToAdd}
             onChange={(e) => addAttendee(e.target.value)}
+            disabled={attendeesLoading}
             className="w-full px-3 py-2.5 text-sm focus:ring-2 focus:ring-teal-500"
           >
-            <option value="">Select Attendee to Add</option>
-            {availableToAdd.map((u) => (
+            {/* Distinguish "still loading" from "genuinely nobody eligible"
+                — an empty dropdown while eligible attendees are still in
+                flight would otherwise look identical to a real empty
+                scope. */}
+            <option value="">{attendeesLoading ? "Loading attendees…" : "Select Attendee to Add"}</option>
+            {!attendeesLoading && availableToAdd.map((u) => (
               <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
             ))}
           </Select>

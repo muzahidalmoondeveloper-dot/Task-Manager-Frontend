@@ -136,9 +136,11 @@ function toDateInputValue(date) {
 }
 
 function ThreeDotsIcon() {
+  // Vertical kebab (⋮) — three dots stacked on a shared x, not the
+  // horizontal (…) row this used to render.
   return (
     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-      <path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM18 10a2 2 0 11-4 0 2 2 0 014 0z" />
+      <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
     </svg>
   );
 }
@@ -182,7 +184,12 @@ export default function ProjectDetailPage() {
   const [taskRequests, setTaskRequests] = useState([]);
   const [isLoadingTaskRequests, setIsLoadingTaskRequests] = useState(false);
   const [convertingRequest, setConvertingRequest] = useState(null);
-  const [convertForm, setConvertForm] = useState({ team_id: "", assignee_id: "", priority: "medium", due_date: "" });
+  // Client Task Request conversion follow-up: explicit conversion_mode —
+  // "self" (the converting PM/staff member becomes the assignee) or
+  // "team" (delegated to one of this Project's attached Teams, left
+  // Unassigned for the Team Manager to pick an owner). No assignee_id
+  // field at all — see backend TaskRequestConvert's own docstring for why.
+  const [convertForm, setConvertForm] = useState({ conversion_mode: "self", team_id: "", priority: "medium", due_date: "" });
   const [isConvertingRequest, setIsConvertingRequest] = useState(false);
 
   const [formData, setFormData] = useState(initialForm);
@@ -215,14 +222,32 @@ export default function ProjectDetailPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
 
+  // Project Manager Task-update follow-up / duplicate-toast fix: a task id
+  // in this set has an inline quick-mutation already in flight — disables
+  // that row's control until it settles, so a repeated click can never
+  // fire a second identical PATCH or produce a second identical toast.
+  const [pendingTaskIds, setPendingTaskIds] = useState(() => new Set());
+  function markTaskPending(taskId, isPending) {
+    setPendingTaskIds((prev) => {
+      const next = new Set(prev);
+      if (isPending) next.add(taskId); else next.delete(taskId);
+      return next;
+    });
+  }
+
   const [error, setError] = useState("");
 
   const isEditing = editingTaskId !== null;
   const canManageTasks = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
-  // Project Managers can create tasks under their assigned project(s) and set
-  // the team, but cannot edit/delete/change status on tasks (backend-enforced
-  // create-only scope) — kept as a separate flag so those controls stay
-  // manager-only below.
+  // Project Manager Task-update follow-up: a plain Project Manager can now
+  // edit a task's core details (title, description, priority, status,
+  // dates, team) on any task under a project they genuinely manage — the
+  // backend's `update_task` enforces this scope independently — but never
+  // assign/reassign an individual person. `canManageTasks` keeps its exact
+  // original meaning (individual-assignment authority; Owner/Admin/Team
+  // Manager only) everywhere below; `canEditTaskDetails` is the new, wider
+  // set for everything else. Every task on this page is already scoped to
+  // THIS project the PM manages, so no per-row check is needed.
   const canCreateTasks = canManageTasks || user?.role === "project_manager" || user?.is_project_manager;
   // The "Assign Team" dropdown in Create Task: Owners/Admins/Team Managers
   // keep seeing their existing org-wide-or-managed team list (`teams`, from
@@ -233,19 +258,42 @@ export default function ProjectDetailPage() {
   // gated by the same require_project_access() check that let them open
   // this project at all), never the full org list.
   const assignableTeams = (canCreateTasks && !canManageTasks) ? projectTeams : teams;
+  // Project Manager Task-delegation follow-up: creating a Task directly
+  // under a Project is inherently a delegation action for a plain
+  // Project Manager here (Project is already fixed to this page's own
+  // project, and this form never offers an individual Assignee at
+  // create-time for ANY role — see handleSubmit's `assignee_id` below) —
+  // so Team must be REQUIRED, never optional, or the Task would have no
+  // Team to delegate to at all.
+  const isPlainProjectManager = canCreateTasks && !canManageTasks;
+  const canEditTaskDetails = canManageTasks || isPlainProjectManager;
   const canManageProjects = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin || user?.role === "team_manager";
-  // Project Manager Team-selection bug-fix: who may explicitly attach/
-  // detach a Team on THIS project (POST/DELETE /projects/{id}/teams/...).
-  // Deliberately NOT the same set as canManageProjects above — a plain
-  // Team Manager can manage tasks/logo here but must NOT be able to
-  // attach an arbitrary team to a project merely by being a Team Manager
-  // (backend's require_project_access blocks that too; see
-  // app.core.project_access's "ProjectMembership alone is never
-  // sufficient" rule) — only Owner/Admin, or a genuine Project Manager
-  // (who reached this page at all only because they're a member of it).
+  // Project-Team Overview-visibility follow-up: THREE separate concerns,
+  // deliberately not collapsed into one flag —
+  //   A. READ Project-Team data for Task workflows (Create/Edit Task's
+  //      Team dropdown) — every role that can create/edit a Team Task
+  //      needs this; it is NOT gated by any of the flags below at all.
+  //      `projectTeams` state is fetched unconditionally in loadData()
+  //      regardless of who's viewing, so the dropdown never regresses
+  //      just because the Overview section is hidden.
+  //   B. DISPLAY the Project Overview "Teams" section (heading/count/
+  //      cards) — see canViewProjectTeamsOverview below.
+  //   C. MANAGE (attach/detach) Project-Team associations — see
+  //      canManageProjectTeams below.
+  // Backend authority (app.api.routes.projects._require_can_manage_project_teams)
+  // restricts B/C to Owner/Admin only — a plain Project Manager (even one
+  // who is a genuine member of this project) does NOT get
+  // association-management authority merely from Project Manager
+  // capability, and a Team Manager does not get it from Team-management
+  // capability either (managing a Team ≠ managing which Teams a Project
+  // has) — so B and C intentionally resolve to the same Owner/Admin-only
+  // set today. They're kept as two named flags (not one) so a future,
+  // deliberate product decision to split them (e.g. read-only cards
+  // visible to more roles than attach/detach) doesn't require re-deriving
+  // this from scratch.
   const isAdminOrOwner = user?.role === "owner" || user?.role === "admin" || user?.is_org_admin;
-  const isProjectManagerCapability = user?.role === "project_manager" || user?.is_project_manager;
-  const canManageProjectTeams = isAdminOrOwner || isProjectManagerCapability;
+  const canViewProjectTeamsOverview = isAdminOrOwner;
+  const canManageProjectTeams = isAdminOrOwner;
 
   async function handleLogoFileChange(e) {
     const file = e.target.files?.[0];
@@ -312,16 +360,10 @@ export default function ProjectDetailPage() {
   // team is selected (Rule B/C precedence), org-wide list otherwise.
   const modalAssignees = formData.team_id ? teamAssignableUsers : assignees;
 
-  // Same Team-scoping, independently, for the Task Request -> Task
-  // conversion form below (`convertForm`) — its own Team field is always
-  // required, so this is always a Team Task once submitted.
-  const [convertTeamAssignableUsers, setConvertTeamAssignableUsers] = useState([]);
-  useEffect(() => {
-    const teamId = convertForm.team_id;
-    Promise.resolve(teamId ? teamApi.getAssignableUsers(teamId) : [])
-      .then((members) => setConvertTeamAssignableUsers(Array.isArray(members) ? members : []))
-      .catch(() => setConvertTeamAssignableUsers([]));
-  }, [convertForm.team_id]);
+  // Client Task Request conversion follow-up: no individual-assignee
+  // dropdown at all in the convert modal any more (see backend
+  // TaskRequestConvert's docstring — "self" or "team" only), so this form
+  // no longer needs a team-eligible-members lookup.
 
   // Inline-assignee-dropdown bug-fix follow-up: the INLINE quick-assignee
   // `<Select>` in the project's task table needs options for however
@@ -714,7 +756,13 @@ export default function ProjectDetailPage() {
 
   function openConvertModal(request) {
     setConvertingRequest(request);
-    setConvertForm({ team_id: "", assignee_id: "", priority: "medium", due_date: "" });
+    // No sensible default that can't cause accidental incorrect
+    // assignment: "self" is a real, deliberate choice (it does correctly
+    // assign the converting user to a Task they may legitimately want),
+    // and it's also the mode that needs no further input, so it's kept
+    // as the modal's starting selection — never a silent, unreviewed
+    // submission, since the PM still has to click "Convert to Task".
+    setConvertForm({ conversion_mode: "self", team_id: "", priority: "medium", due_date: "" });
   }
 
   function handleConvertFormChange(event) {
@@ -722,20 +770,27 @@ export default function ProjectDetailPage() {
     setConvertForm((current) => ({ ...current, [name]: value }));
   }
 
+  function handleConvertModeChange(mode) {
+    // Switching Team -> Self must clear any stale team_id so a leftover
+    // selection can never be silently resubmitted; switching Self -> Team
+    // starts team_id empty so the PM must explicitly pick a valid Team.
+    setConvertForm((current) => ({ ...current, conversion_mode: mode, team_id: "" }));
+  }
+
   async function handleConvertRequest(event) {
     event.preventDefault();
-    if (!convertForm.team_id) return;
+    if (convertForm.conversion_mode === "team" && !convertForm.team_id) return;
     try {
       setIsConvertingRequest(true);
-      const updated = await taskRequestApi.convert(projectId, convertingRequest.id, {
-        team_id: Number(convertForm.team_id),
-        assignee_id: convertForm.assignee_id ? Number(convertForm.assignee_id) : null,
-        priority: convertForm.priority,
-        due_date: convertForm.due_date || null,
-      });
+      const payload =
+        convertForm.conversion_mode === "team"
+          ? { conversion_mode: "team", team_id: Number(convertForm.team_id), priority: convertForm.priority, due_date: convertForm.due_date || null }
+          : { conversion_mode: "self", priority: convertForm.priority, due_date: convertForm.due_date || null };
+      const updated = await taskRequestApi.convert(projectId, convertingRequest.id, payload);
       setTaskRequests((current) => current.map((r) => (r.id === updated.id ? updated : r)));
       setConvertingRequest(null);
       toast.success("Task request converted into a task.");
+      loadData();
     } catch (err) {
       toast.error(err.message || "Failed to convert task request.");
     } finally {
@@ -852,17 +907,34 @@ export default function ProjectDetailPage() {
       setIsSubmitting(true);
       setError("");
 
-      const payload = {
-        name: formData.name,
-        description: formData.description || null,
-        start_date: formData.start_date || null,
-        due_date: formData.due_date || null,
-        // New tasks are created unassigned; assignment happens later (edit).
-        assignee_id: isEditing && formData.assignee_id ? Number(formData.assignee_id) : null,
-        project_id: Number(projectId),
-        team_id: formData.team_id ? Number(formData.team_id) : null,
-        status: formData.status,
-      };
+      // Project Manager Task-update follow-up: a plain PM editing an
+      // existing task must never send assignee_id or project_id at all —
+      // even the task's own unchanged current value — since the backend
+      // rejects their mere presence in the payload as a deliberate (or
+      // manipulated) attempt, not something to silently strip. Only the
+      // create-time payload (never a plain PM's edit) still needs
+      // project_id/assignee_id; a plain PM editing gets the narrow,
+      // whitelisted payload instead.
+      const payload = (isEditing && isPlainProjectManager)
+        ? {
+            name: formData.name,
+            description: formData.description || null,
+            start_date: formData.start_date || null,
+            due_date: formData.due_date || null,
+            team_id: formData.team_id ? Number(formData.team_id) : null,
+            status: formData.status,
+          }
+        : {
+            name: formData.name,
+            description: formData.description || null,
+            start_date: formData.start_date || null,
+            due_date: formData.due_date || null,
+            // New tasks are created unassigned; assignment happens later (edit).
+            assignee_id: isEditing && formData.assignee_id ? Number(formData.assignee_id) : null,
+            project_id: Number(projectId),
+            team_id: formData.team_id ? Number(formData.team_id) : null,
+            status: formData.status,
+          };
 
       if (isEditing) {
         const updatedTask = await taskApi.update(editingTaskId, payload);
@@ -917,11 +989,22 @@ export default function ProjectDetailPage() {
   }
 
   async function quickStatusUpdate(task, status) {
+    if (pendingTaskIds.has(task.id)) return;
+    setOpenActionMenuId(null);
+    markTaskPending(task.id, true);
     try {
-      setOpenActionMenuId(null);
       setError("");
 
-      const updatedTask = await taskApi.updateStatus(task.id, status);
+      // Project Manager Task-update follow-up: PATCH /tasks/{id}/status
+      // (`update_task_status`) is a separate, bespoke route that only
+      // supports TEAM_MEMBER self-service or Owner/Admin — never extended
+      // for a plain PM, since `update_task` already implements and tests
+      // identical direct-completion semantics. A plain PM's quick status/
+      // Done actions go through the already-fixed `PATCH /tasks/{id}`
+      // instead; every other role's behavior here is unchanged.
+      const updatedTask = isPlainProjectManager
+        ? await taskApi.update(task.id, { status })
+        : await taskApi.updateStatus(task.id, status);
 
       setTasks((current) =>
         current.map((item) => (item.id === task.id ? updatedTask : item))
@@ -931,26 +1014,51 @@ export default function ProjectDetailPage() {
     } catch (err) {
       setError(err.message || "Unable to update task status.");
       toast.error(err.message || "Unable to update task status.");
+    } finally {
+      markTaskPending(task.id, false);
     }
   }
 
   async function quickPriorityUpdate(task, priority) {
+    if (pendingTaskIds.has(task.id)) return;
+    markTaskPending(task.id, true);
     try {
       const updatedTask = await taskApi.update(task.id, { priority });
       setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
       toast.success("Task priority updated.");
     } catch (err) {
       toast.error(err.message || "Unable to update task priority.");
+    } finally {
+      markTaskPending(task.id, false);
     }
   }
 
   async function quickAssigneeUpdate(task, assigneeId) {
+    if (pendingTaskIds.has(task.id)) return;
+    markTaskPending(task.id, true);
     try {
       const updatedTask = await taskApi.update(task.id, { assignee_id: assigneeId ? Number(assigneeId) : null });
       setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
       toast.success("Task assignee updated.");
     } catch (err) {
       toast.error(err.message || "Unable to update task assignee.");
+    } finally {
+      markTaskPending(task.id, false);
+    }
+  }
+
+  // Project Manager Task-update follow-up: Start/Due Date inline editors.
+  async function quickDateUpdate(task, field, newValue) {
+    if (pendingTaskIds.has(task.id)) return;
+    markTaskPending(task.id, true);
+    try {
+      const updatedTask = await taskApi.update(task.id, { [field]: newValue || null });
+      setTasks((current) => current.map((item) => (item.id === task.id ? updatedTask : item)));
+      toast.success(field === "start_date" ? "Start date updated." : "Due date updated.");
+    } catch (err) {
+      toast.error(err.message || "Unable to update date.");
+    } finally {
+      markTaskPending(task.id, false);
     }
   }
 
@@ -1298,7 +1406,13 @@ export default function ProjectDetailPage() {
               </div>
             )}
 
-            {/* ── Teams ── */}
+            {/* ── Teams — Overview-visibility follow-up: the entire block
+                (heading, count, cards, Add/remove controls) is
+                conditionally rendered, never CSS-hidden, and never left
+                as an empty spacer — a plain Project Manager (no Admin/
+                Owner capability) gets no DOM for this section at all, so
+                the page reflows naturally with no gap. ── */}
+            {canViewProjectTeamsOverview && (
             <div>
               <div className="mb-4 flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-slate-900">Teams</h2>
@@ -1350,9 +1464,7 @@ export default function ProjectDetailPage() {
                   </svg>
                   <p className="text-sm font-medium text-slate-500">No teams are working on this project yet.</p>
                   <p className="mt-1 text-xs text-slate-400">
-                    {canManageProjectTeams
-                      ? "Use + Add Team above to attach an existing team, or teams appear automatically once their Rocks, KPIs, or tasks are linked to this project."
-                      : "Teams appear here once their Rocks, KPIs, or tasks are linked to this project."}
+                    Use + Add Team above to attach an existing team, or teams appear automatically once their Rocks, KPIs, or tasks are linked to this project.
                   </p>
                 </div>
               ) : (
@@ -1397,6 +1509,7 @@ export default function ProjectDetailPage() {
                 </div>
               )}
             </div>
+            )}
 
             {/* ── Objectives → Rocks → KPIs ── */}
             <div>
@@ -1789,7 +1902,7 @@ export default function ProjectDetailPage() {
                       Working Time
                     </th>
 
-                    {canManageTasks ? (
+                    {canEditTaskDetails ? (
                       <th className="w-16 px-4 py-3 text-right font-semibold text-slate-700">
                         Actions
                       </th>
@@ -1804,6 +1917,7 @@ export default function ProjectDetailPage() {
                         <td className="px-4 py-4 align-middle">
                           <button
                             type="button"
+                            disabled={pendingTaskIds.has(task.id) || (!canEditTaskDetails && task.assignee_id !== user?.id)}
                             onClick={() =>
                               quickStatusUpdate(
                                 task,
@@ -1813,7 +1927,7 @@ export default function ProjectDetailPage() {
                             className={
                               task.status === "done"
                                 ? "flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs text-white"
-                                : "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-400 text-xs text-slate-400 hover:border-slate-900 hover:text-slate-900"
+                                : "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-slate-400 text-xs text-slate-400 hover:border-slate-900 hover:text-slate-900 disabled:cursor-not-allowed disabled:opacity-60"
                             }
                             title={
                               task.status === "done"
@@ -1838,9 +1952,10 @@ export default function ProjectDetailPage() {
                         </td>
 
                         <td className="px-4 py-4 align-middle">
-                          {canManageTasks ? (
+                          {canEditTaskDetails ? (
                             <Select
                               value={task.priority || "medium"}
+                              disabled={pendingTaskIds.has(task.id)}
                               onChange={(event) => quickPriorityUpdate(task, event.target.value)}
                               className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold capitalize text-slate-700 focus:border-slate-900 focus:outline-none"
                             >
@@ -1894,17 +2009,34 @@ export default function ProjectDetailPage() {
                         </td>
 
                         <td className="px-4 py-4 align-middle text-slate-700">
-                          {formatDate(task.start_date) || "—"}
+                          {canEditTaskDetails ? (
+                            <DatePicker
+                              value={task.start_date || ""}
+                              disabled={pendingTaskIds.has(task.id)}
+                              onChange={(event) => quickDateUpdate(task, "start_date", event.target.value)}
+                            />
+                          ) : (
+                            formatDate(task.start_date) || "—"
+                          )}
                         </td>
 
                         <td className="px-4 py-4 align-middle text-slate-700">
-                          {formatDate(task.due_date) || "—"}
+                          {canEditTaskDetails ? (
+                            <DatePicker
+                              value={task.due_date || ""}
+                              disabled={pendingTaskIds.has(task.id)}
+                              onChange={(event) => quickDateUpdate(task, "due_date", event.target.value)}
+                            />
+                          ) : (
+                            formatDate(task.due_date) || "—"
+                          )}
                         </td>
 
                         <td className="px-4 py-4 align-middle">
-                          {canManageTasks ? (
+                          {canEditTaskDetails ? (
                             <Select
                               value={task.status}
+                              disabled={pendingTaskIds.has(task.id)}
                               onChange={(event) =>
                                 quickStatusUpdate(task, event.target.value)
                               }
@@ -1938,13 +2070,14 @@ export default function ProjectDetailPage() {
                           />
                         </td>
 
-                        {canManageTasks ? (
+                        {canEditTaskDetails ? (
                           <td className="relative px-4 py-4 text-right align-middle">
                             <button
                               type="button"
                               onClick={() => toggleActionMenu(task.id)}
                               className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900"
                               title="Task actions"
+                              aria-label="Task actions"
                             >
                               <ThreeDotsIcon />
                             </button>
@@ -1959,19 +2092,25 @@ export default function ProjectDetailPage() {
                                   }}
                                   className="block w-full px-4 py-2.5 text-left text-sm font-medium text-slate-700 hover:bg-slate-50"
                                 >
-                                  Edit
+                                  Edit Task
                                 </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setOpenActionMenuId(null);
-                                    handleDelete(task);
-                                  }}
-                                  className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
-                                >
-                                  Delete
-                                </button>
+                                {/* A plain Project Manager joins this same
+                                    menu but never gets Delete — DELETE
+                                    /tasks/{id} stays Owner/Admin/Team-
+                                    Manager only, unchanged. */}
+                                {canManageTasks ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenActionMenuId(null);
+                                      handleDelete(task);
+                                    }}
+                                    className="block w-full px-4 py-2.5 text-left text-sm font-medium text-red-600 hover:bg-red-50"
+                                  >
+                                    Delete
+                                  </button>
+                                ) : null}
                               </div>
                             ) : null}
                           </td>
@@ -1981,7 +2120,7 @@ export default function ProjectDetailPage() {
                   ) : (
                     <tr>
                       <td
-                        colSpan={canManageTasks ? 10 : 9}
+                        colSpan={canEditTaskDetails ? 10 : 9}
                         className="px-4 py-8 text-center text-sm text-slate-500"
                       >
                         No tasks found in this project.
@@ -2019,7 +2158,7 @@ export default function ProjectDetailPage() {
                       </h3>
 
                       <p className="mt-2 text-xs text-slate-500">
-                        Assignee: {task.assignee?.full_name || "No assignee"}
+                        Assignee: {task.assignee?.full_name || "Unassigned"}
                       </p>
 
                       <p className="mt-1 text-xs text-slate-500">
@@ -2073,6 +2212,16 @@ export default function ProjectDetailPage() {
                             className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50"
                           >
                             Delete
+                          </button>
+                        </div>
+                      ) : canEditTaskDetails ? (
+                        <div className="mt-4">
+                          <button
+                            type="button"
+                            onClick={() => handleEdit(task)}
+                            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                          >
+                            Edit Task
                           </button>
                         </div>
                       ) : null}
@@ -2175,7 +2324,7 @@ export default function ProjectDetailPage() {
                             <button
                               key={task.id}
                               type="button"
-                              onClick={() => canManageTasks && handleEdit(task)}
+                              onClick={() => canEditTaskDetails && handleEdit(task)}
                               className="block w-full truncate rounded bg-teal-100 px-2 py-1 text-left text-xs font-medium text-teal-900"
                               title={task.name}
                             >
@@ -2400,8 +2549,20 @@ export default function ProjectDetailPage() {
               </div>
 
               {/* Assignee is set later, on edit — new tasks are created
-                  unassigned so they land in the team's To-Do list. */}
-              {isEditing && (
+                  unassigned so they land in the team's To-Do list. A plain
+                  Project Manager never gets an editable Assignee control —
+                  a Team Manager decides ownership of a delegated task — but
+                  still sees who currently owns it (read-only, not hidden). */}
+              {isEditing && isPlainProjectManager ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">
+                    Assignee
+                  </label>
+                  <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    {modalAssignees.find((a) => String(a.id) === String(formData.assignee_id))?.full_name || "Unassigned"}
+                  </p>
+                </div>
+              ) : isEditing ? (
                 <div>
                   <label className="mb-1 block text-sm font-medium text-slate-700">
                     Assignee
@@ -2422,17 +2583,18 @@ export default function ProjectDetailPage() {
                     ))}
                   </Select>
                 </div>
-              )}
+              ) : null}
 
               <div>
                 <label className="mb-1 block text-sm font-medium text-slate-700">
-                  Team
+                  Team{isPlainProjectManager && !isEditing ? " *" : ""}
                 </label>
 
                 <Select
                   name="team_id"
                   value={formData.team_id}
                   onChange={handleChange}
+                  required={isPlainProjectManager && !isEditing}
                   className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                 >
                   <option value="">Select team</option>
@@ -2447,7 +2609,7 @@ export default function ProjectDetailPage() {
                 {!assignableTeams.length ? (
                   <p className="mt-1 text-xs text-slate-400">
                     {canCreateTasks && !canManageTasks
-                      ? "No teams are working on this project yet — ask a manager to assign one."
+                      ? "No teams are assigned to this project — ask an Owner/Admin to attach one before delegating tasks."
                       : "No teams yet — you can assign one later from the Teams page."}
                   </p>
                 ) : null}
@@ -2666,39 +2828,74 @@ export default function ProjectDetailPage() {
 
             <form onSubmit={handleConvertRequest} className="space-y-5">
               <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Team</label>
-                <Select
-                  name="team_id"
-                  value={convertForm.team_id}
-                  onChange={handleConvertFormChange}
-                  required
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Select team</option>
-                  {teams.map((team) => (
-                    <option key={team.id} value={team.id}>
-                      {team.name}
-                    </option>
-                  ))}
-                </Select>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Assignment</label>
+                {/* Client Task Request conversion follow-up: exactly two
+                    explicit modes, never inferred from whether a team_id
+                    happens to be picked. A Project Manager (or any staff
+                    member converting) never assigns an individual Team
+                    Member directly here — "self" takes the request for
+                    themself, "team" delegates it to one of this Project's
+                    attached Teams and leaves it Unassigned for that
+                    Team's Manager to pick an owner. */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleConvertModeChange("self")}
+                    aria-pressed={convertForm.conversion_mode === "self"}
+                    className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                      convertForm.conversion_mode === "self"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    Take for myself
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleConvertModeChange("team")}
+                    aria-pressed={convertForm.conversion_mode === "team"}
+                    className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
+                      convertForm.conversion_mode === "team"
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-300 text-slate-700 hover:bg-slate-50"
+                    }`}
+                  >
+                    Assign to a team
+                  </button>
+                </div>
               </div>
 
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-700">Assignee (optional)</label>
-                <Select
-                  name="assignee_id"
-                  value={convertForm.assignee_id}
-                  onChange={handleConvertFormChange}
-                  className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Unassigned</option>
-                  {convertTeamAssignableUsers.map((assignee) => (
-                    <option key={assignee.id} value={assignee.id}>
-                      {assignee.role ? `${assignee.full_name} — ${assignee.role}` : assignee.full_name}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+              {convertForm.conversion_mode === "team" ? (
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-slate-700">Team *</label>
+                  <Select
+                    name="team_id"
+                    value={convertForm.team_id}
+                    onChange={handleConvertFormChange}
+                    required
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  >
+                    <option value="">Select team</option>
+                    {/* Client Task Request conversion follow-up: ALWAYS
+                        this Project's attached Teams (`projectTeams`) —
+                        never the org-wide `teams` list, and never an
+                        individual-member picker. The backend enforces
+                        the identical Project<->Team attachment rule
+                        regardless of who converts, so this can't drift
+                        from what the server will actually accept. */}
+                    {projectTeams.map((team) => (
+                      <option key={team.id} value={team.id}>
+                        {team.name}
+                      </option>
+                    ))}
+                  </Select>
+                  {!projectTeams.length ? (
+                    <p className="mt-1 text-xs text-slate-500">
+                      No teams are attached to this project yet — attach one from the Overview tab first.
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
@@ -2730,7 +2927,7 @@ export default function ProjectDetailPage() {
                 </button>
                 <button
                   type="submit"
-                  disabled={isConvertingRequest || !teams.length}
+                  disabled={isConvertingRequest || (convertForm.conversion_mode === "team" && !convertForm.team_id)}
                   className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
                 >
                   {isConvertingRequest ? "Converting..." : "Convert to Task"}

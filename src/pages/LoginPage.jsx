@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { useAuth } from "../context/AuthContext";
+import { OTP_RESEND_COOLDOWN_SECONDS } from "../utils/otpConstants";
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
@@ -189,7 +190,7 @@ export default function LoginPage() {
         toast.success(response.message || "OTP sent to your email.");
         setOtpPurpose("register");
         setStep("otp");
-        setResendCooldown(30);
+        setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
         setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
         return;
       }
@@ -197,7 +198,7 @@ export default function LoginPage() {
         toast.success(response.message || "OTP sent to your email.");
         setOtpPurpose("login");
         setStep("otp");
-        setResendCooldown(30);
+        setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
         setTimeout(() => document.getElementById("otp-0")?.focus(), 100);
         return;
       }
@@ -220,8 +221,15 @@ export default function LoginPage() {
     try {
       await resendOtp({ email: formData.email, purpose: otpPurpose });
       toast.success("A new code has been sent.");
-      setResendCooldown(30);
+      setResendCooldown(OTP_RESEND_COOLDOWN_SECONDS);
     } catch (err) {
+      // The backend enforces the real cooldown independently of this
+      // local timer (e.g. a page refresh resets `resendCooldown` to 0,
+      // but a direct/early resend still gets rejected here) — when it
+      // rejects for that reason, resync the visible countdown to the
+      // actual remaining time instead of leaving the button re-enabled.
+      const retryAfter = err.details?.retry_after_seconds;
+      if (typeof retryAfter === "number") setResendCooldown(retryAfter);
       toast.error(err.message || "Unable to resend code.");
     }
   }

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 
 import { scoreboardApi } from "../api/scoreboardApi";
+import { useAuth } from "../context/AuthContext";
 import DatePicker from "../components/DatePicker";
 import {
   PERIOD_OPTIONS,
@@ -16,9 +17,27 @@ const VIEW_OPTIONS = [
   { value: "manager", label: "Manager" },
 ];
 
+// Scoreboard authorization follow-up: Scoreboard is an ADMIN-ONLY feature
+// — same canonical Admin capability and direct-navigation guard pattern
+// as UserScoreboardPage.jsx / UsersPage.jsx's canViewOrgUsers.
+function canViewScoreboard(user) {
+  if (!user) return true; // don't redirect before the user has loaded
+  return user.role === "owner" || user.role === "admin" || Boolean(user.is_org_admin);
+}
+
 export default function OrganizationScoreboardPage() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const hasScoreboardAccess = canViewScoreboard(user);
   const [searchParams, setSearchParams] = useSearchParams();
+
+  useEffect(() => {
+    if (user && !hasScoreboardAccess) {
+      toast.error("You don't have permission to access Scoreboard.");
+      navigate("/dashboard", { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
 
   const view = searchParams.get("view") || "employee";
   const period = searchParams.get("period") || "this_month";
@@ -64,6 +83,7 @@ export default function OrganizationScoreboardPage() {
   }, [period, customStart, customEnd]);
 
   useEffect(() => {
+    if (!hasScoreboardAccess) return;
     if (period === "custom" && (!customStart || !customEnd)) return;
 
     let cancelled = false;
@@ -90,7 +110,7 @@ export default function OrganizationScoreboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [view, queryParams]);
+  }, [hasScoreboardAccess, view, queryParams]);
 
   const employeeRows = data?.employees || [];
   const teamRows = data?.teams || [];
