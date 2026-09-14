@@ -917,12 +917,6 @@ export default function TasksPage() {
   const [users,    setUsers]    = useState([]);
   const [projects, setProjects] = useState([]);
   const [teams,    setTeams]    = useState([]);
-  // Team Manager Create-Task-form follow-up: project_id -> the subset of
-  // THIS caller's own managed Teams attached to it (from GET
-  // /projects/for-managed-teams) — used as the classic Create/Edit Task
-  // modal's Project->Team fallback whenever GET /projects/{id}/items is
-  // blocked for the current actor (a plain Team Manager).
-  const [managedTeamProjectMap, setManagedTeamProjectMap] = useState({});
 
   // Team Manager task-authority-precedence follow-up (bug fix): the flat
   // `canManageTasks`/`canEditTaskDetails` above are correct for "All
@@ -1128,12 +1122,14 @@ export default function TasksPage() {
     // isn't permitted to call can't also blank out the Project/Team
     // filter options this role DOES have legitimate access to.
     // Team Manager Create-Task-form follow-up: GET /projects/for-managed-teams
-    // is the scoped, additive source for a plain Team Manager (whose GET
-    // /projects is always empty by design) — settled independently too, so
-    // it never blanks out the org-wide `projects` result for Owner/Admin/PM.
-    // `team_ids` from this call still feeds the Project->Team cascade
-    // (`managedTeamProjectMap`) below — kept even though the PROJECT LIST
-    // itself now also gets the broader org-wide source next.
+    // is a secondary, additive Project-list source (defense in depth if
+    // /projects/options is ever unreachable for some reason) — settled
+    // independently too, so it never blanks out the org-wide `projects`
+    // result for Owner/Admin/PM. Its `team_ids` field is NOT used to
+    // filter the Team dropdown (see the Project/Team-independence
+    // follow-up below) — Project and Team are independent context
+    // fields for a Team Manager's own Task/To-Do, never one filtering
+    // the other.
     //
     // Team Manager Project-dropdown follow-up: `for-managed-teams` alone
     // is still too narrow for the actual product rule — it only returns
@@ -1165,9 +1161,6 @@ export default function TasksPage() {
     for (const p of managedTeamProjects) if (!merged.has(p.id)) merged.set(p.id, p);
     for (const p of orgProjectOptions) if (!merged.has(p.id)) merged.set(p.id, p);
     setProjects(Array.from(merged.values()));
-    if (managedTeamProjects.length) {
-      setManagedTeamProjectMap(Object.fromEntries(managedTeamProjects.map((p) => [p.id, p.team_ids])));
-    }
   }
 
   // Bulk Working Time for both task tables on this page — ONE request per
@@ -1324,53 +1317,22 @@ export default function TasksPage() {
         ? [{ id: user.id, full_name: user.full_name || user.email }, ...assignees]
         : assignees);
 
-  // Team Manager Create-Task-form follow-up: Project->Team dependency.
-  // null = no restriction (no Project selected, or the source couldn't
-  // resolve one way or the other yet) — Team dropdown then shows every
-  // Team this actor already has (Owner/Admin: every org Team; Team
-  // Manager: their own managed Teams, from the existing, already-correct
-  // GET /teams). A non-null array narrows the Team dropdown to exactly
-  // that Project's attached Teams.
-  const [modalProjectTeamIds, setModalProjectTeamIds] = useState(null);
-  useEffect(() => {
-    const projectId = formData.project_id;
-    if (!projectId) { setModalProjectTeamIds(null); return; }
-    let cancelled = false;
-    projectApi.listItems(projectId)
-      .then((items) => {
-        if (cancelled) return;
-        setModalProjectTeamIds((items?.teams || []).map((t) => t.id));
-      })
-      .catch(() => {
-        if (cancelled) return;
-        // GET /projects/{id}/items is blocked for a plain Team Manager
-        // (require_project_management_access) — fall back to the
-        // Team-scoped source: which of THIS caller's own managed Teams
-        // (already fetched alongside `projects`) is attached to this
-        // exact Project. Never an unrelated Team.
-        setModalProjectTeamIds(managedTeamProjectMap[projectId] || []);
-      });
-    return () => { cancelled = true; };
-  }, [formData.project_id, managedTeamProjectMap]);
-
-  // Team Manager Create-Task-form follow-up: changing Project must
-  // clear/revalidate an incompatible Team selection (which, via the
-  // effect above, cascades into clearing an incompatible Assignee too).
-  useEffect(() => {
-    if (modalProjectTeamIds === null) return;
-    setFormData((p) => (
-      p.team_id && !modalProjectTeamIds.some((id) => String(id) === String(p.team_id))
-        ? { ...p, team_id: "" }
-        : p
-    ));
-  }, [modalProjectTeamIds]);
-
-  // The classic modal's actual Team option source — every Team this actor
-  // already has (unchanged) when no Project is selected yet, or hasn't
-  // resolved a restriction; the Project-scoped intersection otherwise.
-  const modalTeamOptions = modalProjectTeamIds === null
-    ? teams
-    : teams.filter((t) => modalProjectTeamIds.some((id) => String(id) === String(t.id)));
+  // Project/Team-independence follow-up: Project and Team are INDEPENDENT
+  // Task/To-Do context fields for a Team Manager (and Owner/Admin, who
+  // share this same classic modal) — selecting/changing/clearing a
+  // Project must never filter, narrow, or clear the Team dropdown, and
+  // no Project<->Team attachment is required to combine them. This used
+  // to intersect the Team list with the selected Project's attached
+  // Teams (via GET /projects/{id}/items or the managed-Team/Project
+  // fallback), which produced an empty Team dropdown the instant a
+  // Project had no explicit ProjectTeam link to any of this actor's
+  // managed Teams — the exact reported bug. The backend enforces the
+  // identical independence now (see create_task's/update_task's own
+  // comments) — this is not solely a frontend fix. A Project Manager's
+  // OWN delegation form is a completely separate modal/state
+  // (pmModalProjectTeams) and is UNCHANGED — Project->attached-Team
+  // remains required there.
+  const modalTeamOptions = teams;
 
   // Inline-assignee-dropdown bug-fix follow-up: the INLINE quick-assignee
   // `<Select>` in the "All Tasks" table (unlike the Create/Edit modal

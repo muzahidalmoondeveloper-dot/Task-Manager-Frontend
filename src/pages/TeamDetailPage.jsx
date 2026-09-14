@@ -15,6 +15,7 @@ import { getDueRowClassName } from "../utils/taskDueStatus";
 
 import { teamApi } from "../api/teamApi";
 import { taskApi } from "../api/taskApi";
+import { projectApi } from "../api/projectApi";
 import { teamNewsApi } from "../api/teamNewsApi";
 import { userApi } from "../api/userApi";
 import { organizationApi } from "../api/organizationApi";
@@ -832,10 +833,11 @@ const TEAM_PAGE_TABS = [
   { id: "scoreboard", label: "Scoreboard" },
 ];
 
-export function CreateTodoModal({ team, users, editing, onClose, onSave, saving, onTimeChange }) {
+export function CreateTodoModal({ team, users, projects, editing, onClose, onSave, saving, onTimeChange }) {
   const [name, setName] = useState(editing?.name || "");
   const [description, setDescription] = useState(editing?.description || "");
   const [icon, setIcon] = useState(editing?.icon || null);
+  const [projectId, setProjectId] = useState(editing?.project_id ? String(editing.project_id) : "");
   const [assigneeId, setAssigneeId] = useState(
     editing?.assignee_id ? String(editing.assignee_id) : editing?.assignee?.id ? String(editing.assignee.id) : ""
   );
@@ -851,6 +853,7 @@ export function CreateTodoModal({ team, users, editing, onClose, onSave, saving,
       name: name.trim(),
       description: description.trim() || null,
       icon,
+      project_id: projectId ? Number(projectId) : null,
       assignee_id: assigneeId ? Number(assigneeId) : null,
       start_date: startDate || null,
       due_date: dueDate || null,
@@ -861,6 +864,7 @@ export function CreateTodoModal({ team, users, editing, onClose, onSave, saving,
   }
 
   const selectedAssignee = users.find((u) => String(u.id) === String(assigneeId));
+  const selectedProject = (projects || []).find((p) => String(p.id) === String(projectId));
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/40 p-8 backdrop-blur-sm">
@@ -908,6 +912,34 @@ export function CreateTodoModal({ team, users, editing, onClose, onSave, saving,
             {/* Time tracking only applies to a to-do that already exists —
                 nothing to start a timer on until Create To-Do is saved. */}
             {editing && <TaskTimeTracker taskId={editing.id} onTimeChange={onTimeChange} />}
+
+            {/* Project — Team To-Do Project-field follow-up: optional,
+                every active same-org Project (never filtered by this
+                Team, ProjectMembership, or Project<->Team attachment —
+                Project and Team are independent context fields here too,
+                same rule as the classic Task modal). Selecting a Project
+                never changes the Team (already fixed to this page's
+                Team) or the Assignee options below. */}
+            <div>
+              <label className="mb-1.5 block text-xs font-semibold text-slate-500">Project</label>
+              <div className="relative">
+                <div className="flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2.5">
+                  <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path d="M2 6a2 2 0 012-2h5l2 2h5a2 2 0 012 2v6a2 2 0 01-2 2H4a2 2 0 01-2-2V6z" />
+                  </svg>
+                  <span className="flex-1 truncate text-sm text-slate-700">{selectedProject?.name || "No project"}</span>
+                  <svg className="h-4 w-4 shrink-0 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M5.22 8.22a.75.75 0 011.06 0L10 11.94l3.72-3.72a.75.75 0 111.06 1.06l-4.25 4.25a.75.75 0 01-1.06 0L5.22 9.28a.75.75 0 010-1.06z" clipRule="evenodd" />
+                  </svg>
+                </div>
+                <Select value={projectId} onChange={(e) => setProjectId(e.target.value)}
+                  wrapperClassName="absolute inset-0" hideChevron
+                  className="h-full w-full cursor-pointer opacity-0">
+                  <option value="">No project</option>
+                  {(projects || []).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </Select>
+              </div>
+            </div>
 
             {/* Assignee */}
             <div>
@@ -1014,6 +1046,7 @@ export default function TeamDetailPage() {
   const [showTodoModal, setShowTodoModal] = useState(false);
   const [todoSaving, setTodoSaving] = useState(false);
   const [todoUsers, setTodoUsers] = useState([]);
+  const [todoProjects, setTodoProjects] = useState([]);
   const [editingTodo, setEditingTodo] = useState(null);
   const [celebrationData, setCelebrationData] = useState(null);
 
@@ -1148,6 +1181,20 @@ export default function TeamDetailPage() {
       .then((members) => setTodoUsers(Array.isArray(members) ? members : []))
       .catch(() => setTodoUsers([]));
   }, [teamId]);
+
+  // Team To-Do Project-field follow-up: the canonical, org-wide "every
+  // active Project in this organization" source (same one Task Create/
+  // Rock Create/KPI Create already use) — deliberately NOT scoped to
+  // this Team, NOT filtered by ProjectMembership/Project<->Team
+  // attachment, and NOT re-fetched when the Team changes (a Team To-Do's
+  // Project is an independent context field, same rule as the classic
+  // Task modal). No org-wide GET /users-style admin gate here either —
+  // /projects/options is available to any non-Client org member.
+  useEffect(() => {
+    projectApi.options()
+      .then((options) => setTodoProjects(Array.isArray(options) ? options : []))
+      .catch(() => setTodoProjects([]));
+  }, []);
 
   function openTodoModal(task = null) {
     setEditingTodo(task);
@@ -1566,6 +1613,7 @@ export default function TeamDetailPage() {
         <CreateTodoModal
           team={team}
           users={todoUsers}
+          projects={todoProjects}
           editing={editingTodo}
           onClose={() => { setShowTodoModal(false); setEditingTodo(null); }}
           onSave={handleSaveTodo}
