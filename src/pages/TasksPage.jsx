@@ -2,6 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import Select from "../components/Select";
 import toast from "react-hot-toast";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  KeyboardSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  pointerWithin,
+  closestCenter,
+} from "@dnd-kit/core";
 
 import { taskApi } from "../api/taskApi";
 import { userApi } from "../api/userApi";
@@ -102,6 +114,198 @@ function DueDateCell({ task }) {
       {formatDate(task.due_date)}
       {overdue && <span className="ml-1 text-[10px] font-bold uppercase text-red-500">Overdue</span>}
     </span>
+  );
+}
+
+// ─── Board drag-and-drop (dnd-kit migration) ───────────────────────────────
+//
+// `BoardTaskCard` is the single presentational Task-card used for BOTH
+// boards' real cards AND the `DragOverlay` preview — the exact same JSX,
+// never a second copy kept in sync by hand. It takes only plain data/
+// booleans/callbacks as props (no closures over TasksPage's internal
+// state), so it can be reused for the crisp overlay render, which has no
+// live dnd-kit wiring of its own.
+//
+//   showAssignee     — All Tasks Board cards AND the DragOverlay preview
+//                       show Assignee; My Tasks Board cards don't (matches
+//                       the pre-migration native-DnD card layouts exactly,
+//                       plus the overlay's own explicit "assignee" content
+//                       requirement).
+//   showInlineStatus — My Tasks Board's real card only: the existing quick
+//                       status <Select> fallback (untouched business logic
+//                       — same `onStatusChange`/`quickStatusUpdate` path).
+//   showReviewActions— All Tasks Board's real card only: Approve/Assign
+//                       Back (Pending Review) or Edit/Delete, unchanged.
+//   isOverlay        — DragOverlay's crisp, elevated, non-interactive
+//                       presentation: full opacity, no handle/controls.
+//   isPlaceholder    — the SOURCE card while its own DragOverlay is active:
+//                       dimmed, never faded/blurred the way native HTML5
+//                       DnD's browser ghost image looked.
+function BoardTaskCard({
+  task,
+  showAssignee = false,
+  showInlineStatus = false,
+  showReviewActions = false,
+  canReview = false,
+  isOverlay = false,
+  isPlaceholder = false,
+  canDrag = false,
+  handleRef,
+  handleListeners,
+  pending = false,
+  isReviewPending = false,
+  canChangeStatusValue = false,
+  statusOptions = [],
+  onStatusChange,
+  onApprove,
+  onAssignBack,
+  onEdit,
+  onDelete,
+}) {
+  return (
+    <div
+      className={
+        "rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-opacity w-full " +
+        (isOverlay
+          ? "scale-[1.02] shadow-lg cursor-grabbing"
+          : isPlaceholder
+          ? "opacity-30"
+          : canDrag
+          ? "cursor-grab active:cursor-grabbing"
+          : "")
+      }
+    >
+      <div className="flex items-start gap-2">
+        {/* Drag handle — the ONLY activator surface for dnd-kit's pointer/
+            keyboard sensors (see DraggableBoardCard below); a read-only/
+            non-draggable Task simply never renders one, matching the
+            existing per-task permission helpers exactly (never a new
+            permission). `touch-none` is scoped to this small handle only,
+            so touch-scrolling the rest of the page/card stays normal. */}
+        {canDrag && !isOverlay && (
+          <button
+            type="button"
+            ref={handleRef}
+            {...handleListeners}
+            aria-label={`Move task: ${task.name}`}
+            title="Drag to change status"
+            className="mt-0.5 shrink-0 touch-none select-none rounded p-0.5 text-slate-300 hover:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-400 cursor-grab active:cursor-grabbing"
+          >
+            ⠿
+          </button>
+        )}
+        {isOverlay && <span className="mt-0.5 shrink-0 select-none text-slate-300">⠿</span>}
+        <h3 className={
+          "min-w-0 truncate " +
+          (task.status === "done" ? "text-sm font-medium text-slate-400 line-through" : "text-sm font-medium text-slate-900")
+        }>
+          {task.name}
+        </h3>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1.5">
+        <StatusBadge status={task.status} />
+        <PriorityBadge priority={task.priority} />
+      </div>
+      <p className="mt-2 text-xs text-slate-500">Project: {task.project?.name || "—"}</p>
+      {showAssignee && (
+        <p className="mt-1 text-xs text-slate-500">Assignee: {task.assignee?.full_name || "Unassigned"}</p>
+      )}
+      <p className="mt-1 text-xs text-slate-500">Team: {task.team?.name || "—"}</p>
+      <p className="mt-1 text-xs"><DueDateCell task={task} /></p>
+      {task.review_note && (
+        <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{task.review_note}</p>
+      )}
+
+      {showInlineStatus && canChangeStatusValue && task.status !== "pending_review" && task.status !== "done" && (
+        <div className="mt-3">
+          <Select value={task.status} disabled={pending} onChange={(e) => onStatusChange(task, e.target.value)}
+            className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 focus:border-slate-900 focus:outline-none">
+            {statusOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </Select>
+        </div>
+      )}
+
+      {showReviewActions && (
+        task.status === "pending_review" && canReview ? (
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => onApprove(task)} disabled={isReviewPending}
+              className="flex-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
+              Approve
+            </button>
+            <button type="button" onClick={() => onAssignBack(task)} disabled={isReviewPending}
+              className="flex-1 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60">
+              Assign Back
+            </button>
+          </div>
+        ) : (
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => onEdit(task)}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              Edit
+            </button>
+            <button type="button" onClick={() => onDelete(task)}
+              className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
+              Delete
+            </button>
+          </div>
+        )
+      )}
+    </div>
+  );
+}
+
+// Thin dnd-kit wrapper: calls `useDraggable` and hands its `setNodeRef`
+// (the whole card — only used to detect `isDragging` for the source-
+// placeholder dim, never a CSS transform; the moving copy is entirely the
+// DragOverlay's job) and `setActivatorNodeRef`/`listeners` (the handle
+// only) down to the presentational `BoardTaskCard`. `disabled: !canDrag`
+// is the actual drag-permission enforcement point — driven by the exact
+// same `isTaskDraggable(task)` result TasksPage already computes from its
+// existing, unmodified permission helpers.
+function DraggableBoardCard({ task, canDrag, showAssignee, cardProps }) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, isDragging } = useDraggable({
+    id: task.id,
+    // `showAssignee` rides along in the drag payload so the DragOverlay
+    // (mounted once, outside any specific board) knows which card layout
+    // to render for whichever board this drag actually started from.
+    data: { task, showAssignee },
+    disabled: !canDrag,
+  });
+  return (
+    <div ref={setNodeRef}>
+      <BoardTaskCard
+        task={task}
+        canDrag={canDrag}
+        showAssignee={showAssignee}
+        isPlaceholder={isDragging}
+        handleRef={setActivatorNodeRef}
+        handleListeners={canDrag ? { ...attributes, ...listeners } : undefined}
+        {...cardProps}
+      />
+    </div>
+  );
+}
+
+// Thin dnd-kit wrapper for a status column: `useDroppable` registers this
+// column as a drop target keyed by the CANONICAL status value (never a
+// display label) — `highlighted` is computed by the parent from
+// `dragOverStatus`, which is only ever set to a status the active Task may
+// legally move to (see `isValidDragTarget`), so an invalid destination
+// simply never highlights.
+function BoardStatusColumn({ status, label, count, highlighted, children }) {
+  const { setNodeRef } = useDroppable({ id: status });
+  return (
+    <div ref={setNodeRef}
+      className={
+        "rounded-2xl border p-4 transition-colors " +
+        (highlighted ? "border-slate-900 bg-slate-100 ring-2 ring-slate-900/20" : "border-slate-200 bg-slate-50")
+      }>
+      <h2 className="mb-4 text-sm font-semibold text-slate-700">
+        {label}
+        <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">{count}</span>
+      </h2>
+      <div className="space-y-3">{children}</div>
+    </div>
   );
 }
 
@@ -462,7 +666,7 @@ function TaskCalendar({ tasks, filtersActive, onTaskClick, canClickTask }) {
 
 // ─── Task card for mobile ─────────────────────────────────────────────────────
 
-function TaskCard({ task, canManageTasks, canEditTaskDetails, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
+function TaskCard({ task, canManageTasks, canEditTaskDetails, canReview, user, onEdit, onDelete, onStatusChange, onApprove, onAssignBack, reviewActionTaskId, workingTime, currentUserHasActiveTimer, onTimeChange }) {
   const overdue = isOverdue(task);
 
   return (
@@ -515,7 +719,7 @@ function TaskCard({ task, canManageTasks, canEditTaskDetails, user, onEdit, onDe
       </p>
 
       {/* Actions */}
-      {canManageTasks && task.status === "pending_review" ? (
+      {(canReview ?? canManageTasks) && task.status === "pending_review" ? (
         <div className="mt-3 flex gap-2">
           <button type="button" onClick={() => onApprove(task)} disabled={reviewActionTaskId === task.id}
             className="flex-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -636,6 +840,9 @@ function TaskTableRow({
   reviewActionId,
   canManageTasks,
   canEditTaskDetails,
+  canReview,
+  canChangeStatusValue,
+  statusOptions,
   isTeamMember,
   userId,
   assignees,
@@ -653,18 +860,28 @@ function TaskTableRow({
   assignableUsersByTeamId,
   assignableUsersLoading,
 }) {
-  const canChange = canEditTaskDetails || (
+  // Task-completion-policy follow-up: `canChangeStatusValue`/
+  // `statusOptions` are now computed by the parent from the SAME
+  // canonical `canChangeStatus`/`getStatusOptionsForTask` every other
+  // surface (Board, mobile card, dnd-kit) already uses — this row used
+  // to re-derive a simplified, PER-ROLE-ONLY version locally (flat
+  // `canEditTaskDetails`, not the per-task `canEditTaskDetailsFor`),
+  // which never excluded Pending Review for an own-scoped Task the way
+  // the canonical helper now does. Falls back to the same local
+  // approximation only if a caller doesn't supply the new props, so this
+  // never hard-breaks if some other render path reuses this row.
+  const canChange = canChangeStatusValue ?? (canEditTaskDetails || (
     isTeamMember &&
     task.assignee_id === userId &&
     task.status !== "pending_review" &&
     task.status !== "done"
-  );
+  ));
 
-  const statusOpts = canEditTaskDetails
+  const statusOpts = statusOptions ?? (canEditTaskDetails
     ? STATUS_OPTIONS
     : (task.status === "pending_review" || task.status === "done")
       ? STATUS_OPTIONS.filter((o) => o.value === task.status)
-      : TEAM_MEMBER_STATUS_OPTIONS;
+      : TEAM_MEMBER_STATUS_OPTIONS);
 
   return (
     <tr className={getDueRowClassName(task)}>
@@ -800,7 +1017,7 @@ function TaskTableRow({
       {/* Actions */}
       {canEditTaskDetails ? (
         <td className="px-4 py-4 text-right align-middle">
-          {canManageTasks && task.status === "pending_review" ? (
+          {(canReview ?? canManageTasks) && task.status === "pending_review" ? (
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => onApprove(task)} disabled={reviewActionId === task.id}
                 className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -940,6 +1157,12 @@ export default function TasksPage() {
     () => new Set((teams || []).filter((t) => t.team_manager_id === user?.id).map((t) => t.id)),
     [teams, user?.id]
   );
+  // Task-completion-policy follow-up: the Project-side equivalent of
+  // `managedTeamIds` — populated in `loadFilterData` from the raw
+  // `GET /projects` result (already ProjectMembership-scoped for a plain
+  // PM server-side), never the merged org-wide `projects` list. See that
+  // effect's own comment for why.
+  const [managedProjectIds, setManagedProjectIds] = useState(() => new Set());
   // Granted-flag Team Manager (`is_team_manager`), not just the literal
   // primary role — `canManageTasks` above only checks the literal role
   // string, which already matches the backend's own `is_manager_or_above`
@@ -966,6 +1189,53 @@ export default function TasksPage() {
 
   function canEditTaskDetailsFor(task) {
     return canFullyManageTask(task) || isPlainProjectManager;
+  }
+
+  // Task-completion-policy follow-up — the frontend mirror of the
+  // backend's `can_complete_task_directly`: is THIS Task within the
+  // current actor's own direct-completion scope (their Personal Task, or
+  // a Team/Project they legitimately manage AND they are its actual
+  // assignee)? Deliberately narrower than `canFullyManageTask`/
+  // `canEditTaskDetailsFor`, which also cover a MANAGER acting on a
+  // teammate's Task — a completely different, unrelated authority this
+  // helper must not conflate (see the backend helper's own docstring for
+  // why). Used ONLY to decide whether "Pending Review" should be hidden
+  // as a normal status destination — Owner/Admin are handled separately
+  // (they already get the unrestricted option set regardless) and never
+  // need this "own scope" narrowing.
+  function isOwnScopedTask(task) {
+    if (!task) return false;
+    if (isPersonalTaskOwner(task)) return true;
+    if (task.assignee_id !== user?.id) return false;
+    if (isTeamManagerCapable && task.team_id != null && managedTeamIds.has(task.team_id)) return true;
+    if (isPlainProjectManager && task.project_id != null && managedProjectIds.has(task.project_id)) return true;
+    return false;
+  }
+
+  // Task-completion-policy follow-up (UX bug fix): Approve/Assign Back
+  // used to be shown whenever `canFullyManageTask(task)` was true — but
+  // that helper ALSO returns true for a Personal Task owner and (via
+  // `isPlainProjectManager` through `canEditTaskDetailsFor`, which some
+  // call sites used instead) a PM who merely manages the Task's Project,
+  // neither of which is ever this app's actual review authority (see
+  // `require_task_manage_access`'s own docstring: Approve/Assign Back are
+  // Team-review-workflow actions, Owner/Admin or the exact Team's manager
+  // only — never a plain Project Manager, never a Personal Task's own
+  // owner, who has no reviewer to begin with). Clicking a visible-but-
+  // unauthorized button then just 403'd — this is the precise frontend
+  // mirror of `require_task_manage_access` (no `allow_personal_owner`
+  // here — that kwarg is Delete-only) so the buttons only ever render
+  // for someone who can actually use them.
+  function canReviewTask(task) {
+    if (!task) return false;
+    if (user?.role === "owner" || user?.role === "admin" || user?.is_org_admin) return true;
+    // No self-review UI: an own-scoped Task (Personal, or a Team the
+    // actor manages AND they are its assignee) never shows Approve/
+    // Assign Back for that actor, even if legacy data left it
+    // `pending_review` — that recovery path is a plain status update
+    // (see getStatusOptionsForTask), never a fabricated self-approval.
+    if (isOwnScopedTask(task)) return false;
+    return isTeamManagerCapable && task.team_id != null && managedTeamIds.has(task.team_id);
   }
 
   // Personal-Task-edit-payload follow-up (Issue 2): the Edit Task modal
@@ -1161,6 +1431,20 @@ export default function TasksPage() {
     for (const p of managedTeamProjects) if (!merged.has(p.id)) merged.set(p.id, p);
     for (const p of orgProjectOptions) if (!merged.has(p.id)) merged.set(p.id, p);
     setProjects(Array.from(merged.values()));
+
+    // Task-completion-policy follow-up: `GET /projects` (projectResult /
+    // `baseProjects`) is ALREADY, for a plain Project Manager specifically,
+    // scoped server-side to exactly the Project(s) they hold genuine
+    // ProjectMembership on (see app.core.project_access's own docstring —
+    // for a PM, ProjectMembership IS the management grant) — the same
+    // canonical definition `can_complete_task_directly` uses backend-side.
+    // Deliberately NOT the merged `projects` list above (which also
+    // includes every org-wide-visible Project via /projects/options,
+    // never a signal of PM management). Only ever consulted from inside
+    // an `isPlainProjectManager` check below, so it stays meaningless
+    // (and unused) for Owner/Admin, for whom `baseProjects` is the whole
+    // org's Projects, not a "managed" set.
+    setManagedProjectIds(new Set(baseProjects.map((p) => p.id)));
   }
 
   // Bulk Working Time for both task tables on this page — ONE request per
@@ -1387,7 +1671,28 @@ export default function TasksPage() {
   }
 
   function getStatusOptionsForTask(task) {
-    if (canEditTaskDetailsFor(task)) return STATUS_OPTIONS;
+    if (canEditTaskDetailsFor(task)) {
+      if (isOwnScopedTask(task)) {
+        // Task-completion-policy follow-up: an own-scoped Task (Personal,
+        // or a Team/Project this actor legitimately manages AND they are
+        // its assignee) never offers Pending Review as a normal
+        // destination — direct completion is the whole point of this
+        // scope; they never submit their own work to themselves for
+        // review. If legacy data already left this exact Task
+        // `pending_review` (no normal path produces that for an
+        // own-scoped Task), "Done" is also withheld here — the backend
+        // now refuses a generic-PATCH "done" for ANY Pending Review Task
+        // regardless of scope (see _PENDING_REVIEW_REQUIRES_APPROVAL) —
+        // so only the non-terminal statuses remain, letting the actor
+        // recover it (e.g. back to In Progress) without a self-approval
+        // control ever being fabricated for them.
+        if (task.status === "pending_review") {
+          return STATUS_OPTIONS.filter((o) => o.value !== "pending_review" && o.value !== "done");
+        }
+        return STATUS_OPTIONS.filter((o) => o.value !== "pending_review");
+      }
+      return STATUS_OPTIONS;
+    }
     if (task.status === "pending_review" || task.status === "done") return STATUS_OPTIONS.filter((o) => o.value === task.status);
     return TEAM_MEMBER_STATUS_OPTIONS;
   }
@@ -1704,25 +2009,17 @@ export default function TasksPage() {
     }
   }
 
-  async function quickStatusUpdate(task, newStatus) {
-    // Team Manager Task-update-scope bug fix / duplicate-request follow-up:
-    // `pendingTaskIds` is the actual guard against a double-fire for this
-    // exact task (a second click, or the same task rendered in both the
-    // My Tasks and All Tasks sections at once, sharing this one Set keyed
-    // by task.id) — it disables both rendered controls for this task id
-    // the instant the first request starts, so at most one PATCH is ever
-    // in flight per task. This early return is that guard, not a cosmetic
-    // debounce.
-    if (pendingTaskIds.has(task.id)) return;
-    setOpenMenuId(null);
-    markTaskPending(task.id, true);
-    // A stable per-task toast id: if a duplicate-toast path is ever
-    // reintroduced (or the two list sections above both attempt the same
-    // change), react-hot-toast replaces the existing toast with this id
-    // instead of stacking a second one — the underlying request is still
-    // deduplicated by pendingTaskIds above; this only guarantees the UI
-    // never SHOWS two notifications for what is, at most, one real
-    // network request.
+  // Board-drag-and-drop follow-up: the actual network call + shared-state
+  // reconciliation + Done-celebration/toast logic, factored out of
+  // `quickStatusUpdate` so the Board's drag-and-drop handler below can
+  // share the EXACT same canonical status-update path instead of a second,
+  // parallel implementation — this is the only place either caller talks
+  // to the backend. Returns the server's updated Task on success (already
+  // merged into `myTasks`/`allTasks` via `updateTaskInLists`, so List/
+  // Board/Calendar all reflect it immediately from the same shared state),
+  // or `null` on failure (already toasted here) so a caller that applied
+  // its own optimistic local change beforehand knows to roll it back.
+  async function performStatusUpdate(task, newStatus) {
     const toastId = `task-status-${task.id}`;
     try {
       // Project Manager Task-update follow-up: PATCH /tasks/{id}/status
@@ -1748,8 +2045,170 @@ export default function TasksPage() {
       } else {
         toast.success("Status updated.", { id: toastId });
       }
+      return updated;
     } catch (err) {
       toast.error(err.message || "Unable to update status.", { id: toastId });
+      return null;
+    }
+  }
+
+  async function quickStatusUpdate(task, newStatus) {
+    // Team Manager Task-update-scope bug fix / duplicate-request follow-up:
+    // `pendingTaskIds` is the actual guard against a double-fire for this
+    // exact task (a second click, or the same task rendered in both the
+    // My Tasks and All Tasks sections at once, sharing this one Set keyed
+    // by task.id) — it disables both rendered controls for this task id
+    // the instant the first request starts, so at most one PATCH is ever
+    // in flight per task. This early return is that guard, not a cosmetic
+    // debounce. The Board drag-and-drop handler below reuses this exact
+    // same `pendingTaskIds` Set — a task mid-PATCH from either UI blocks
+    // the other.
+    if (pendingTaskIds.has(task.id)) return;
+    setOpenMenuId(null);
+    markTaskPending(task.id, true);
+    try {
+      await performStatusUpdate(task, newStatus);
+    } finally {
+      markTaskPending(task.id, false);
+    }
+  }
+
+  // ── Board drag-and-drop (Kanban status move — dnd-kit) ─────────────────
+  // Drag-and-drop is only another UI for the SAME status change the
+  // dropdown above already makes — same permission helpers
+  // (`canChangeStatus`/`getStatusOptionsForTask`), same `pendingTaskIds`
+  // guard, same `performStatusUpdate` network/business-logic path. No new
+  // Task permission is introduced anywhere in this block; the backend
+  // remains authoritative regardless of what the frontend allows starting
+  // a drag on. `@dnd-kit/core` is the only new dependency (no sortable/
+  // reordering package — this Board only ever needs "move between
+  // columns," never intra-column ordering) and it replaces the native
+  // HTML5 DnD interaction layer completely; none of the business logic
+  // below changed to make that swap.
+  const [activeDrag, setActiveDrag] = useState(null); // { task, showAssignee } | null — the Task currently being dragged
+  const [dragOverStatus, setDragOverStatus] = useState(null);
+
+  const dndSensors = useSensors(
+    // PointerSensor unifies mouse AND touch (modern Pointer Events) — a
+    // single sensor covers both, per dnd-kit's own recommendation, rather
+    // than separate Mouse/Touch sensors. `distance: 6` is an activation
+    // constraint: the pointer must move ~6px before a drag starts, so a
+    // plain click (Edit/Delete/status <Select>/the card itself) is never
+    // mistaken for a drag.
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    // Built-in keyboard support (Tab to the handle, then arrow keys/Space/
+    // Escape) — the drag handle is a real, focusable <button> with
+    // dnd-kit's own `attributes` (role, tabIndex, aria-describedby)
+    // spread onto it, so this works without any custom coordinate logic.
+    useSensor(KeyboardSensor),
+  );
+
+  // Recommended dnd-kit multi-container pattern: try the strict
+  // "pointer is literally over this droppable" check first (accurate for
+  // large, non-overlapping column rects), falling back to nearest-center
+  // only when the pointer isn't over any column (e.g. in the grid gutter)
+  // — never custom collision math.
+  function collisionDetectionStrategy(args) {
+    const pointerCollisions = pointerWithin(args);
+    if (pointerCollisions.length > 0) return pointerCollisions;
+    return closestCenter(args);
+  }
+
+  // Pending Review is deliberately excluded from the generic drag path.
+  // This mirrors an ALREADY-EXISTING app convention, not a new rule: the
+  // My Tasks Board's own status dropdown already hides itself entirely
+  // for `pending_review`/`done` (see its `task.status !== "pending_review"
+  // && task.status !== "done"` guard below), and the All Tasks Board
+  // already replaces Edit/Delete with dedicated Approve/Assign Back
+  // buttons for exactly this status — because leaving Pending Review has
+  // its own distinct business logic (`approve_task`/`assign_task_back`:
+  // different review_note text, different notification target, and
+  // `assign_task_back` unconditionally lands on "in_progress" specifically,
+  // not whatever column it was dropped into) that a generic status PATCH
+  // does not reproduce. Reproducing that independently in the drag
+  // handler would be exactly the "duplicate Done/reopen business logic"
+  // this feature must not do. The one exception: dropping a Pending
+  // Review card directly into the Done column reuses the EXISTING
+  // `approveTask` action verbatim (same one-click behavior as its
+  // button, no note prompt, no ambiguity about which status it produces)
+  // — every other Pending-Review-origin drop is left to the existing
+  // Approve/Assign Back buttons, unchanged.
+  function isTaskDraggable(task) {
+    if (task.status === "pending_review") {
+      // Same reviewer authority the Approve/Assign Back buttons require
+      // (`canReviewTask` — mirrors `require_task_manage_access` server-
+      // side, no personal-owner exception, and explicitly excludes an
+      // own-scoped Task even if legacy data left it Pending Review — no
+      // self-approval-by-drag either) and the same in-flight guard their
+      // own buttons already use.
+      return canReviewTask(task) && reviewActionId !== task.id;
+    }
+    return canChangeStatus(task) && !pendingTaskIds.has(task.id);
+  }
+
+  function isValidDragTarget(task, statusValue) {
+    if (task.status === statusValue) return false; // same-column is never a valid "move"
+    if (task.status === "pending_review") return statusValue === "done"; // see isTaskDraggable's docstring
+    // Only the exact set of statuses `getStatusOptionsForTask` already
+    // allows this task's owner/assignee to move it to — the identical
+    // per-task permission surface the dropdown's own `<option>` list uses.
+    return getStatusOptionsForTask(task).some((o) => o.value === statusValue);
+  }
+
+  function handleDragStart(event) {
+    const task = event.active?.data?.current?.task;
+    if (!task) return;
+    setActiveDrag({ task, showAssignee: event.active.data.current.showAssignee });
+  }
+
+  function handleDragOver(event) {
+    const task = event.active?.data?.current?.task;
+    const statusValue = event.over?.id ?? null;
+    setDragOverStatus(task && statusValue && isValidDragTarget(task, statusValue) ? statusValue : null);
+  }
+
+  // Escape, releasing outside any droppable, or losing collision entirely
+  // all resolve to `event.over === null` in onDragEnd (dnd-kit's own
+  // `onDragCancel` fires for the Escape/interrupted case specifically) —
+  // both paths below converge on the same "no valid target -> no request,
+  // no state change" behavior.
+  async function handleDragEnd(event) {
+    const task = event.active?.data?.current?.task;
+    const statusValue = event.over?.id ?? null;
+    setActiveDrag(null);
+    setDragOverStatus(null);
+    if (!task || !statusValue) return; // dropped outside any column, or no valid collision
+    if (!isValidDragTarget(task, statusValue)) return; // defense in depth — dragover above already gated this
+    if (task.status === "pending_review") {
+      // statusValue === "done" is the only path isValidDragTarget allows
+      // here — reuse the existing Approve action verbatim, never a raw
+      // status PATCH (see this block's own docstring above).
+      await approveTask(task);
+      return;
+    }
+    await handleBoardStatusDrop(task, statusValue);
+  }
+
+  function handleDragCancel() {
+    setActiveDrag(null);
+    setDragOverStatus(null);
+  }
+
+  async function handleBoardStatusDrop(task, newStatus) {
+    if (pendingTaskIds.has(task.id)) return; // one authoritative update sequence per Task, shared with the dropdown
+    markTaskPending(task.id, true);
+    const original = task;
+    // Optimistic move — Board columns/counts and List/Calendar all
+    // recompute naturally from this same shared `myTasks`/`allTasks`
+    // state, so nothing Board-specific needs to be duplicated.
+    updateTaskInLists({ ...task, status: newStatus });
+    try {
+      const result = await performStatusUpdate(task, newStatus);
+      if (!result) {
+        // Backend rejected/failed — roll back to the original status;
+        // performStatusUpdate already showed the error toast.
+        updateTaskInLists(original);
+      }
     } finally {
       markTaskPending(task.id, false);
     }
@@ -1900,6 +2359,14 @@ export default function TasksPage() {
   // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
+    <DndContext
+      sensors={dndSensors}
+      collisionDetection={collisionDetectionStrategy}
+      onDragStart={handleDragStart}
+      onDragOver={handleDragOver}
+      onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
+    >
     <div className="w-full">
       {/* Page header */}
       <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
@@ -2095,7 +2562,7 @@ export default function TasksPage() {
                               </td>
                               <td className="px-4 py-4 text-right align-middle">
                                 {canEditTaskDetailsFor(task) ? (
-                                  canFullyManageTask(task) && task.status === "pending_review" ? (
+                                  canReviewTask(task) && task.status === "pending_review" ? (
                                     <div className="flex justify-end gap-2">
                                       <button type="button" onClick={() => approveTask(task)} disabled={reviewActionId === task.id}
                                         className="rounded-lg bg-green-600 px-3 py-2 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
@@ -2166,44 +2633,24 @@ export default function TasksPage() {
             ) : (
               <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                 {STATUS_OPTIONS.map((s) => (
-                  <div key={s.value} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <h2 className="mb-4 text-sm font-semibold text-slate-700">
-                      {s.label}
-                      <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">
-                        {groupedMyByStatus[s.value]?.length || 0}
-                      </span>
-                    </h2>
-                    <div className="space-y-3">
-                      {groupedMyByStatus[s.value]?.map((task) => (
-                        <div key={task.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                          <h3 className={task.status === "done" ? "text-sm font-medium text-slate-400 line-through" : "text-sm font-medium text-slate-900"}>
-                            {task.name}
-                          </h3>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            <StatusBadge status={task.status} />
-                            <PriorityBadge priority={task.priority} />
-                          </div>
-                          <p className="mt-2 text-xs text-slate-500">Project: {task.project?.name || "—"}</p>
-                          <p className="mt-1 text-xs text-slate-500">Team: {task.team?.name || "—"}</p>
-                          <p className="mt-1 text-xs"><DueDateCell task={task} /></p>
-                          {task.review_note && (
-                            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{task.review_note}</p>
-                          )}
-                          {canChangeStatus(task) && task.status !== "pending_review" && task.status !== "done" && (
-                            <div className="mt-3">
-                              <Select value={task.status} onChange={(e) => quickStatusUpdate(task, e.target.value)}
-                                className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-700 focus:border-slate-900 focus:outline-none">
-                                {getStatusOptionsForTask(task).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                              </Select>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {!groupedMyByStatus[s.value]?.length && (
-                        <p className="rounded-xl bg-white px-4 py-5 text-sm text-slate-400">No tasks here.</p>
-                      )}
-                    </div>
-                  </div>
+                  <BoardStatusColumn key={s.value} status={s.value} label={s.label}
+                    count={groupedMyByStatus[s.value]?.length || 0}
+                    highlighted={dragOverStatus === s.value}>
+                    {groupedMyByStatus[s.value]?.map((task) => (
+                      <DraggableBoardCard key={task.id} task={task} canDrag={isTaskDraggable(task)} showAssignee={false}
+                        cardProps={{
+                          showInlineStatus: true,
+                          pending: pendingTaskIds.has(task.id),
+                          canChangeStatusValue: canChangeStatus(task),
+                          statusOptions: getStatusOptionsForTask(task),
+                          onStatusChange: quickStatusUpdate,
+                        }}
+                      />
+                    ))}
+                    {!groupedMyByStatus[s.value]?.length && (
+                      <p className="rounded-xl bg-white px-4 py-5 text-sm text-slate-400">No tasks here.</p>
+                    )}
+                  </BoardStatusColumn>
                 ))}
               </section>
             )
@@ -2342,6 +2789,9 @@ export default function TasksPage() {
                               reviewActionId={reviewActionId}
                               canManageTasks={canManageTasks}
                               canEditTaskDetails={canEditTaskDetails}
+                              canReview={canReviewTask(task)}
+                              canChangeStatusValue={canChangeStatus(task)}
+                              statusOptions={getStatusOptionsForTask(task)}
                               isTeamMember={isTeamMember}
                               userId={user?.id}
                               assignees={assignees}
@@ -2379,6 +2829,7 @@ export default function TasksPage() {
                         task={task}
                         canManageTasks={canManageTasks}
                         canEditTaskDetails={canEditTaskDetails}
+                        canReview={canReviewTask(task)}
                         isTeamMember={isTeamMember}
                         user={user}
                         onEdit={handleEdit}
@@ -2407,62 +2858,26 @@ export default function TasksPage() {
             ) : (
               <section className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
                 {STATUS_OPTIONS.map((s) => (
-                  <div key={s.value} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <h2 className="mb-4 text-sm font-semibold text-slate-700">
-                      {s.label}
-                      <span className="ml-2 rounded-full bg-white px-2 py-0.5 text-xs text-slate-500">
-                        {groupedByStatus[s.value]?.length || 0}
-                      </span>
-                    </h2>
-                    <div className="space-y-3">
-                      {groupedByStatus[s.value]?.map((task) => (
-                        <div key={task.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                          <div className="flex items-start justify-between gap-2">
-                            <h3 className={task.status === "done" ? "text-sm font-medium text-slate-400 line-through" : "text-sm font-medium text-slate-900"}>
-                              {task.name}
-                            </h3>
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            <StatusBadge status={task.status} />
-                            <PriorityBadge priority={task.priority} />
-                          </div>
-                          <p className="mt-2 text-xs text-slate-500">Project: {task.project?.name || "—"}</p>
-                          <p className="mt-1 text-xs text-slate-500">Assignee: {task.assignee?.full_name || "Unassigned"}</p>
-                          <p className="mt-1 text-xs text-slate-500">Team: {task.team?.name || "—"}</p>
-                          <p className="mt-1 text-xs"><DueDateCell task={task} /></p>
-                          {task.review_note && (
-                            <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">{task.review_note}</p>
-                          )}
-                          {task.status === "pending_review" ? (
-                            <div className="mt-3 flex gap-2">
-                              <button type="button" onClick={() => approveTask(task)} disabled={reviewActionId === task.id}
-                                className="flex-1 rounded-lg bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 disabled:opacity-60">
-                                Approve
-                              </button>
-                              <button type="button" onClick={() => assignBackTask(task)} disabled={reviewActionId === task.id}
-                                className="flex-1 rounded-lg border border-amber-300 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-50 disabled:opacity-60">
-                                Assign Back
-                              </button>
-                            </div>
-                          ) : (
-                            <div className="mt-3 flex gap-2">
-                              <button type="button" onClick={() => handleEdit(task)}
-                                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
-                                Edit
-                              </button>
-                              <button type="button" onClick={() => handleDelete(task)}
-                                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-600 hover:bg-red-50">
-                                Delete
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {!groupedByStatus[s.value]?.length && (
-                        <p className="rounded-xl bg-white px-4 py-5 text-sm text-slate-400">No tasks here.</p>
-                      )}
-                    </div>
-                  </div>
+                  <BoardStatusColumn key={s.value} status={s.value} label={s.label}
+                    count={groupedByStatus[s.value]?.length || 0}
+                    highlighted={dragOverStatus === s.value}>
+                    {groupedByStatus[s.value]?.map((task) => (
+                      <DraggableBoardCard key={task.id} task={task} canDrag={isTaskDraggable(task)} showAssignee
+                        cardProps={{
+                          showReviewActions: true,
+                          canReview: canReviewTask(task),
+                          isReviewPending: reviewActionId === task.id,
+                          onApprove: approveTask,
+                          onAssignBack: assignBackTask,
+                          onEdit: handleEdit,
+                          onDelete: handleDelete,
+                        }}
+                      />
+                    ))}
+                    {!groupedByStatus[s.value]?.length && (
+                      <p className="rounded-xl bg-white px-4 py-5 text-sm text-slate-400">No tasks here.</p>
+                    )}
+                  </BoardStatusColumn>
                 ))}
               </section>
             )
@@ -2638,7 +3053,19 @@ export default function TasksPage() {
                   <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
                   <Select name="status" value={formData.status} onChange={handleChange}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {/* Task-completion-policy follow-up: when editing an
+                        own-scoped Task (Personal, or a Team/Project this
+                        actor manages AND they are its assignee), Pending
+                        Review is never offered here either — same
+                        canonical `getStatusOptionsForTask` the List/Board/
+                        dnd-kit already use, never a second, modal-only
+                        status list. Creating a new Task has no existing
+                        Task to scope yet, so the full set applies there
+                        (a brand-new Task never starts life pending
+                        review anyway). */}
+                    {(isEditing && editingTask ? getStatusOptionsForTask(editingTask) : STATUS_OPTIONS).map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
                   </Select>
                 </div>
               </div>
@@ -2861,7 +3288,13 @@ export default function TasksPage() {
                   <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
                   <Select name="status" value={formData.status} onChange={handleChange}
                     className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm">
-                    {STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    {/* Task-completion-policy follow-up — same canonical
+                        `getStatusOptionsForTask` as the classic modal;
+                        this PM-only modal is always an edit (never a
+                        create), so `editingTask` is always available. */}
+                    {(editingTask ? getStatusOptionsForTask(editingTask) : STATUS_OPTIONS).map((o) => (
+                      <option key={o.value} value={o.value}>{o.label}</option>
+                    ))}
                   </Select>
                 </div>
               </div>
@@ -2925,5 +3358,22 @@ export default function TasksPage() {
         </div>
       )}
     </div>
+    {/* DragOverlay — the crisp, full-opacity moving copy. dnd-kit portals
+        this to document.body by default, so it is never clipped by the
+        Board columns' own layout/overflow or any modal/toast stacking
+        context, and z-index conflicts with the rest of the app are
+        avoided rather than hand-tuned. Reuses the exact same
+        `BoardTaskCard` presentational component the real cards render —
+        never a second, hand-kept-in-sync card. */}
+    <DragOverlay>
+      {activeDrag ? (
+        <BoardTaskCard
+          task={activeDrag.task}
+          showAssignee={activeDrag.showAssignee}
+          isOverlay
+        />
+      ) : null}
+    </DragOverlay>
+    </DndContext>
   );
 }
